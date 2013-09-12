@@ -43,6 +43,7 @@ import Compressor
 dv = Compressor.vectord(10)
 C = Compressor.CompressorClass()
 import numpy as np
+C.P = [1.0,2.0,3.0]
 C.set_P([1.0,2.0,3.0])
 C.P = dv
 print C.P
