@@ -1,6 +1,5 @@
 #include "CPState.h"
 #include "BPHE.h"
-
 #include <algorithm>
 
 //class PHEHXClass():
@@ -59,17 +58,58 @@
             ('Area fraction Subcooled Cold','-',self.w_subcooled_c)
          ]*/
         
+void BrazedPlateHeatExchanger::_check()
+{
+	if (this->State_h_inlet.T() < this->State_c_inlet.T())
+	{
+		if (this->verbosity > 0)
+		{
+			std::cout << format("Cold stream inlet temperature [%g K] is above hot stream inlet temperature [%g K]",this->State_c_inlet.T(), this->State_h_inlet.T()).c_str() << std::endl;
+		}
+		throw ValueError(format("Cold stream inlet temperature [%g K] is above hot stream inlet temperature [%g K]",this->State_c_inlet.T(), this->State_h_inlet.T()).c_str());
+	}
+}
 void BrazedPlateHeatExchanger::calculate()
 {
-	this->DetermineQmax();
+	// Check that the inputs are ok
+	_check();
+	// Find the saturation states
+	this->SaturationStates();
+	// Determine the maximum heat transfer rate considering internal and external pinching
+	double Qmax = this->DetermineQmax();
 };
+
+void BrazedPlateHeatExchanger::SaturationStates()
+{
+	State_h_sat = CoolPropStateClassSI(this->State_h_inlet.pFluid);
+	State_c_sat = CoolPropStateClassSI(this->State_c_inlet.pFluid);
+
+	State_h_sat.update(iP, State_h_inlet.p(), iQ, 0);
+	State_c_sat.update(iP, State_c_inlet.p(), iQ, 0);
+
+}
+std::vector<double> BrazedPlateHeatExchanger::GetTCellBoundaries(CoolPropStateClassSI *State_inlet, std::vector<double> *EnthalpyList)
+{
+	CoolPropStateClassSI State((*State_inlet).pFluid);
+	
+	// Copy to make T the same size as the EnthalpyList
+	std::vector<double> T = (*EnthalpyList);
+
+	for (int i = 0; i < (int)T.size(); i++)
+	{
+		State.update(iP,(*State_inlet).p(),iH,(*EnthalpyList)[i]);
+		T[i] = State.T();
+	}
+	return T;
+}
 double BrazedPlateHeatExchanger::DetermineQmax()
 {
 	double Qmax;
     // See if each phase could change phase if it were to reach the
     // inlet temperature of the opposite phase 
 
-	CoolPropStateClass State_h_max = this->State_h_inlet, State_c_max = this->State_c_inlet;
+	CoolPropStateClassSI State_h_max(this->State_h_inlet.pFluid);
+	CoolPropStateClassSI State_c_max(this->State_c_inlet.pFluid);
     
 	// *****************  EXTERNAL PINCHING ************************
     // Find the maximum possible rate of heat transfer as the minimum of 
@@ -77,7 +117,7 @@ double BrazedPlateHeatExchanger::DetermineQmax()
 	// at constant pressure
 	State_h_max.update(iT, State_c_inlet.T(), iP, State_h_inlet.p());
 	State_c_max.update(iT, State_h_inlet.T(), iP, State_c_inlet.p());
-  
+	
 	// The maximum possible heat transfer rate considering just the external pinching
 	double Qhot_max = this->mdot_h*(State_h_inlet.h() - State_h_max.h());
 	double Qcold_max = this->mdot_c*(State_c_max.h() - State_c_inlet.h());
@@ -98,30 +138,43 @@ double BrazedPlateHeatExchanger::DetermineQmax()
 	one or both of the fluids might change phase in the BPHE.  Even so, at this
 	point, it is still possible that neither fluid will change phase if the 
 	fluid that is *not* the limiting Q would change phase in going to the inlet
-	state of the other fluid
+	state of the other fluid    
+	
+	Now we need to check for internal pinch points where the temperature
+    profiles would tend to overlap given the "normal" definitions of 
+    maximum heat transfer of taking each stream to the inlet temperature 
+    of the other stream
 	*/
+	
+    // First we build the vectors of enthalpies and temperatures for this heat transfer rate
+    this->BuildEnthalpyLists(Qmax);
 
-	double rr = 0;
-    
-    // Now we need to check for internal pinch points where the temperature
-    // profiles would tend to overlap given the "normal" definitions of 
-    // maximum heat transfer of taking each stream to the inlet temperature 
-    // of the other stream
-    //
-    // First we build the same vectors of enthalpies like below
-    //EnthalpyList_c,EnthalpyList_h=self.BuildEnthalpyLists(Qmax)
-    
-	// Then we find the temperature of each stream at each junction
-//    TList_c=np.zeros_like(EnthalpyList_c)
-//    TList_h=np.zeros_like(EnthalpyList_h)
-//
-//    if not len(EnthalpyList_h)==len(EnthalpyList_c):
-//        raise ValueError('Length of enthalpy lists for both fluids must be the same')
-//    
-//    // Make the lists of temperatures of each fluid at each cell boundary
-//    for i in range(len(EnthalpyList_h)):
-//        TList_c[i] = TrhoPhase_ph(self.Ref_c,self.pin_c,EnthalpyList_c[i],self.Tbubble_c,self.Tdew_c,self.rhosatL_c,self.rhosatV_c)[0]
-//        TList_h[i] = TrhoPhase_ph(self.Ref_h,self.pin_h,EnthalpyList_h[i],self.Tbubble_h,self.Tdew_h,self.rhosatL_h,self.rhosatV_h)[0]
+	// Now compare the temperatures at each internal cell boundary
+	bool _internal_pinching = false;
+	std::vector<double> pinching_indices;
+	for (int i = 0; i < (int)TemperatureList_c.size(); i++)
+	{
+		// Internal pinching if the temperature of the cold stream at the cell boundary is hotter 
+		// than the hot stream
+		if (TemperatureList_c[i] > TemperatureList_h[i])
+		{
+			_internal_pinching = true;
+			pinching_indices.push_back(i);
+		}
+	}
+	if (!_internal_pinching)
+	{
+		std::cout << Qmax << std::endl;
+		return Qmax; 
+	}
+	else
+	{
+		std::cout << "Internal pinching" << " " << pinching_indices.size() << std::endl;
+		return Qmax;
+	}
+	return Qmax;
+ //  	
+	//double rr = 0; 
 //    
 //    // TODO: could do with more generality if both streams can change phase
 //    // Check if any internal points are pinched
@@ -215,68 +268,98 @@ double BrazedPlateHeatExchanger::DetermineQmax()
 //        Outputs=PHE_1phase_hdP(Inputs)
 //        return Outputs['h'],Outputs['cp'],Outputs
 //    
-//    def BuildEnthalpyLists(self,Q):
-//        #Start the enthalpy lists with inlet and outlet enthalpies
-//        #Ordered from lowest to highest enthalpies for both streams
-//        EnthalpyList_h=[self.hin_h-Q/self.mdot_h, self.hin_h]
-//        EnthalpyList_c=[self.hin_c,self.hin_c+Q/self.mdot_c]
-//        
-//        #Save the value of Q and outlet enthalpies
-//        self.Q=Q
-//        self.hout_h=EnthalpyList_h[0]
-//        self.hout_c=EnthalpyList_c[1]
-//        
-//        #Find the phase boundaries that exist, and add them to lists
-//        if IsFluidType(self.Ref_h,'Brine'):
-//            hsatL_h=1e9
-//            hsatV_h=1e9
-//        else:
-//            hsatL_h=Props('H','T',self.Tbubble_h,'D',self.rhosatL_h,self.Ref_h)*1000
-//            hsatV_h=Props('H','T',self.Tdew_h,'D',self.rhosatV_h,self.Ref_h)*1000
-//        
-//        if IsFluidType(self.Ref_c,'Brine'):
-//            hsatL_c=1e9
-//            hsatV_c=1e9
-//        else:
-//            hsatL_c=Props('H','T',self.Tbubble_c,'D',self.rhosatL_c,self.Ref_c)*1000
-//            hsatV_c=Props('H','T',self.Tdew_c,'D',self.rhosatV_c,self.Ref_c)*1000
-//        
-//        # Check whether the enthalpy boundaries are within the bounds set by 
-//        # the imposed amount of heat transfer
-//        if hsatV_c<EnthalpyList_c[-1] and hsatV_c>EnthalpyList_c[0]:
-//            EnthalpyList_c.insert(len(EnthalpyList_c)-1,hsatV_c)
-//        if hsatL_c<EnthalpyList_c[-1] and hsatL_c>EnthalpyList_c[0]:
-//            EnthalpyList_c.insert(1,hsatL_c)
-//            
-//        if hsatV_h<EnthalpyList_h[-1] and hsatV_h>EnthalpyList_h[0]:
-//            EnthalpyList_h.insert(len(EnthalpyList_h)-1,hsatV_h)
-//        if hsatL_h<EnthalpyList_h[-1] and hsatL_h>EnthalpyList_h[0]:
-//            EnthalpyList_h.insert(1,hsatL_h)
-//            
-//        I_h=0
-//        I_c=0
-//        while I_h<len(EnthalpyList_h)-1:
-//            #Try to figure out whether the next phase transition is on the hot or cold side     
-//            Qbound_h=self.mdot_h*(EnthalpyList_h[I_h+1]-EnthalpyList_h[I_h])
-//            Qbound_c=self.mdot_c*(EnthalpyList_c[I_c+1]-EnthalpyList_c[I_c])
-//            if Qbound_h<Qbound_c-1e-9:
-//                # Minimum amount of heat transfer is on the hot side,
-//                # add another entry to EnthalpyList_c 
-//                EnthalpyList_c.insert(I_c+1, EnthalpyList_c[I_c]+Qbound_h/self.mdot_c)
-//            elif Qbound_h>Qbound_c+1e-9:
-//                # Minimum amount of heat transfer is on the cold side,
-//                # add another entry to EnthalpyList_h at the interface
-//                EnthalpyList_h.insert(I_h+1, EnthalpyList_h[I_h]+Qbound_c/self.mdot_h)
-//            I_h+=1
-//            I_c+=1
-//                    
-//        self.hsatL_c=hsatL_c
-//        self.hsatL_h=hsatL_h
-//        self.hsatV_c=hsatV_c
-//        self.hsatV_h=hsatV_h
-//
-//        return EnthalpyList_c,EnthalpyList_h
-//    
+void BrazedPlateHeatExchanger::BuildEnthalpyLists(double Q)
+{
+	CoolPropStateClassSI State_h_outlet(this->State_h_inlet.pFluid);
+	CoolPropStateClassSI State_c_outlet(this->State_c_inlet.pFluid);
+	CoolPropStateClassSI State_h(this->State_h_inlet.pFluid);
+	CoolPropStateClassSI State_c(this->State_c_inlet.pFluid);
+
+    // Start the enthalpy lists with inlet and outlet enthalpies
+    // Ordered from lowest to highest enthalpies for both streams
+	double hin_h = this->State_h_inlet.h();
+	double hin_c = this->State_c_inlet.h();	
+	// Build the enthalpy lists using the bounds
+	this->EnthalpyList_h.resize(2);
+	this->EnthalpyList_h[0] = hin_h - Q/this->mdot_h;
+	this->EnthalpyList_h[1] = hin_h;
+	this->EnthalpyList_c.resize(2);
+	this->EnthalpyList_c[0] = hin_c;
+	this->EnthalpyList_c[1] = hin_c + Q/this->mdot_c;
+
+	// Calculate the states at the outlet of the heat exchanger
+	State_h_outlet.update(iP,this->State_h_inlet.p(),iH,this->EnthalpyList_h[0]);
+	State_c_outlet.update(iP,this->State_c_inlet.p(),iH,this->EnthalpyList_c[1]);
+
+	// Build the temperature lists using the bounds
+	this->TemperatureList_c.resize(2);
+	this->TemperatureList_c[0] = this->State_c_inlet.T();
+	this->TemperatureList_c[1] = State_c_outlet.T();
+	this->TemperatureList_h.resize(2);
+	this->TemperatureList_h[0] = State_h_outlet.T();
+	this->TemperatureList_h[1] = this->State_h_inlet.T();
+
+	// Check whether the enthalpy boundaries are within the bounds set by 
+    // the imposed amount of heat transfer
+	//
+	// If they are, insert them into the enthalpy list
+	double hsatV_c = this->State_c_sat.hV();
+	double hsatL_c = this->State_c_sat.hL();
+	double TsatV_c = this->State_c_sat.TV();
+	double TsatL_c = this->State_c_sat.TL();
+    if (hsatV_c < EnthalpyList_c[1] && hsatV_c > EnthalpyList_c[0])
+	{
+        EnthalpyList_c.insert(EnthalpyList_c.begin()+1, hsatV_c);
+		TemperatureList_c.insert(TemperatureList_c.begin()+1, TsatV_c);
+	}
+    if (hsatL_c < EnthalpyList_c[1] && hsatL_c > EnthalpyList_c[0])
+	{
+        EnthalpyList_c.insert(EnthalpyList_c.begin()+1, hsatL_c);
+		TemperatureList_c.insert(TemperatureList_c.begin()+1, TsatL_c);
+	}
+        
+	double hsatV_h = this->State_h_sat.hV();
+	double hsatL_h = this->State_h_sat.hL();
+	double TsatV_h = this->State_h_sat.TV();
+	double TsatL_h = this->State_h_sat.TL();
+    if (hsatV_h < EnthalpyList_h[1] && hsatV_h > EnthalpyList_h[0])
+	{
+		EnthalpyList_h.insert(EnthalpyList_h.begin()+1, hsatV_h);
+		TemperatureList_h.insert(TemperatureList_h.begin()+1, TsatL_h);
+	}
+    if (hsatL_h < EnthalpyList_h[1] && hsatL_h > EnthalpyList_h[0])
+	{
+        EnthalpyList_h.insert(EnthalpyList_h.begin()+1, hsatL_h);
+		TemperatureList_h.insert(TemperatureList_h.begin()+1, TsatL_h);
+	}
+
+	// Now we need to find the complementary phase boundaries for each cell boundary
+    int I=0;
+	while (I < (int)(EnthalpyList_h.size())-1)
+	{
+        // Try to figure out whether the next phase transition is on the hot or cold side     
+        double Qbound_h = this->mdot_h*(EnthalpyList_h[I+1]-EnthalpyList_h[I]);
+        double Qbound_c = this->mdot_c*(EnthalpyList_c[I+1]-EnthalpyList_c[I]);
+        if (Qbound_h < Qbound_c-1e-9)
+		{
+            // Minimum amount of heat transfer is on the hot side,
+            // add another entry to EnthalpyList_c
+			State_c.update(iP,this->State_c_inlet.p(),iH,EnthalpyList_c[I]+Qbound_h/this->mdot_c);
+			TemperatureList_c.insert(TemperatureList_c.begin()+I+1, State_c.T());
+            EnthalpyList_c.insert(EnthalpyList_c.begin()+I+1, EnthalpyList_c[I]+Qbound_h/this->mdot_c);
+		}
+        else if (Qbound_h > Qbound_c+1e-9)
+		{
+            // Minimum amount of heat transfer is on the cold side,
+            // add another entry to EnthalpyList_h at the interface
+			State_h.update(iP,this->State_h_inlet.p(),iH,EnthalpyList_h[I]+Qbound_c/this->mdot_h);
+			TemperatureList_h.insert(TemperatureList_h.begin()+I+1, State_h.T());
+            EnthalpyList_h.insert(EnthalpyList_h.begin()+I+1, EnthalpyList_h[I]+Qbound_c/this->mdot_h);
+		}
+        I += 1;
+	}
+}
+
 //    def PostProcess(self,cellList):
 //        """
 //        Combine all the cells to calculate overall parameters like pressure drop
@@ -1184,14 +1267,18 @@ double BrazedPlateHeatExchanger::DetermineQmax()
 //        
 void BrazedPlateHeatExchanger::test()
 {
-	// R134a evaporator, powered with hot water
-	this->State_c_inlet = CoolPropStateClass("Propane");
-	this->State_c_inlet.update(iT,280,iQ,0.3);
-	this->mdot_c = 0.030;
+	// Propane water cooled condenser
+	this->State_h_inlet = CoolPropStateClassSI("Propane");
+	this->State_h_inlet.update(iT,330,iQ,0.0);
+	this->State_h_inlet.update(iT,360,iP,this->State_h_inlet.p());
+	this->mdot_h = 0.03;
 	
-	this->State_h_inlet = CoolPropStateClass("Nitrogen");
-	this->State_h_inlet.update(iT,600,iP,101.325);
-	this->mdot_h = 0.30;
+	this->State_c_inlet = CoolPropStateClassSI("Water");
+	this->State_c_inlet.update(iT,295,iP,101325);
+	this->mdot_c = 3.0;
+
+	double d = Props("P",'T',300,'Q',0,"REFPROP-Propane");
+	double rrr = 0;
 }
 //def Evaporator_Datapoints():
 //        

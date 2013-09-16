@@ -21,7 +21,7 @@
 			OutputDirectory="$(SolutionDir)$(ConfigurationName)"
 			IntermediateDirectory="$(ConfigurationName)"
 			ConfigurationType="1"
-			CharacterSet="1"
+			CharacterSet="0"
 			>
 			<Tool
 				Name="VCPreBuildEventTool"
@@ -40,6 +40,7 @@
 			/>
 			<Tool
 				Name="VCCLCompilerTool"
+				AdditionalOptions=""
 				Optimization="0"
 				AdditionalIncludeDirectories="C:\Users\Belli\Documents\Code\achp_git\externals\coolprop\CoolProp"
 				PreprocessorDefinitions="WIN32;_DEBUG;_CONSOLE"
@@ -62,9 +63,8 @@
 			<Tool
 				Name="VCLinkerTool"
 				AdditionalOptions="/VERBOSE:LIB "
-				AdditionalDependencies="CoolPropLib_MTd.lib"
 				LinkIncremental="2"
-				AdditionalLibraryDirectories="externals/coolprop/wrappers/StaticLibrary/VS2008"
+				AdditionalLibraryDirectories=""
 				IgnoreAllDefaultLibraries="false"
 				GenerateDebugInformation="true"
 				SubSystem="1"
@@ -139,9 +139,8 @@
 			<Tool
 				Name="VCLinkerTool"
 				AdditionalOptions="/VERBOSE:LIB"
-				AdditionalDependencies="CoolPropLib_MD.lib"
 				LinkIncremental="1"
-				AdditionalLibraryDirectories="C:\Users\Belli\Documents\Code\achp_git\externals\coolprop\wrappers\StaticLibrary\VS2008"
+				AdditionalLibraryDirectories=""
 				GenerateDebugInformation="true"
 				SubSystem="1"
 				OptimizeReferences="2"
@@ -215,6 +214,194 @@
 			Filter="rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav"
 			UniqueIdentifier="{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}"
 			>
+		</Filter>
+		<Filter
+			Name="CoolProp"
+			>
+			<File
+				RelativePath=".\externals\coolprop\CoolProp\AllFluids.cpp"
+				>
+			</File>
+			<File
+				RelativePath=".\externals\coolprop\CoolProp\Brine.cpp"
+				>
+			</File>
+			<File
+				RelativePath=".\externals\coolprop\CoolProp\Brine.h"
+				>
+			</File>
+			<File
+				RelativePath=".\externals\coolprop\CoolProp\CoolProp.cpp"
+				>
+			</File>
+			<File
+				RelativePath=".\externals\coolprop\CoolProp\CoolProp.h"
+				>
+			</File>
+			<File
+				RelativePath=".\externals\coolprop\CoolProp\CoolPropDLL.cpp"
+				>
+			</File>
+			<File
+				RelativePath=".\externals\coolprop\CoolProp\CoolPropDLL.h"
+				>
+			</File>
+			<File
+				RelativePath=".\externals\coolprop\CoolProp\CoolPropTools.cpp"
+				>
+			</File>
+			<File
+				RelativePath=".\externals\coolprop\CoolProp\CoolPropTools.h"
+				>
+			</File>
+			<File
+				RelativePath=".\externals\coolprop\CoolProp\CPExceptions.h"
+				>
+			</File>
+			<File
+				RelativePath=".\externals\coolprop\CoolProp\CPState.cpp"
+				>
+			</File>
+			<File
+				RelativePath=".\externals\coolprop\CoolProp\CPState.h"
+				>
+			</File>
+			<File
+				RelativePath=".\externals\coolprop\CoolProp\CriticalSplineConstants.cpp"
+				>
+			</File>
+			<File
+				RelativePath=".\externals\coolprop\CoolProp\CriticalSplineConstants.h"
+				>
+			</File>
+			<File
+				RelativePath=".\externals\coolprop\CoolProp\CriticalSplineConstants_T.h"
+				>
+			</File>
+			<File
+				RelativePath=".\externals\coolprop\CoolProp\FluidClass.cpp"
+				>
+			</File>
+			<File
+				RelativePath=".\externals\coolprop\CoolProp\FluidClass.h"
+				>
+			</File>
+			<File
+				RelativePath=".\externals\coolprop\CoolProp\gitrevision.h"
+				>
+			</File>
+			<File
+				RelativePath=".\externals\coolprop\CoolProp\GlobalConstants.h"
+				>
+			</File>
+			<File
+				RelativePath=".\externals\coolprop\CoolProp\Helmholtz.cpp"
+				>
+			</File>
+			<File
+				RelativePath=".\externals\coolprop\CoolProp\Helmholtz.h"
+				>
+			</File>
+			<File
+				RelativePath=".\externals\coolprop\CoolProp\HumidAirProp.cpp"
+				>
+			</File>
+			<File
+				RelativePath=".\externals\coolprop\CoolProp\HumidAirProp.h"
+				>
+			</File>
+			<File
+				RelativePath=".\externals\coolprop\CoolProp\Ice.cpp"
+				>
+			</File>
+			<File
+				RelativePath=".\externals\coolprop\CoolProp\Ice.h"
+				>
+			</File>
+			<File
+				RelativePath=".\externals\coolprop\CoolProp\IncompLiquid.cpp"
+				>
+			</File>
+			<File
+				RelativePath=".\externals\coolprop\CoolProp\IncompLiquid.h"
+				>
+			</File>
+			<File
+				RelativePath=".\externals\coolprop\CoolProp\JSON_CAS.h"
+				>
+			</File>
+			<File
+				RelativePath=".\externals\coolprop\CoolProp\JSON_code.h"
+				>
+			</File>
+			<File
+				RelativePath=".\externals\coolprop\CoolProp\MatrixMath.cpp"
+				>
+			</File>
+			<File
+				RelativePath=".\externals\coolprop\CoolProp\MatrixMath.h"
+				>
+			</File>
+			<File
+				RelativePath=".\externals\coolprop\CoolProp\Mixtures.cpp"
+				>
+			</File>
+			<File
+				RelativePath=".\externals\coolprop\CoolProp\Mixtures.h"
+				>
+			</File>
+			<File
+				RelativePath=".\externals\coolprop\CoolProp\PengRobinson.cpp"
+				>
+			</File>
+			<File
+				RelativePath=".\externals\coolprop\CoolProp\PengRobinson.h"
+				>
+			</File>
+			<File
+				RelativePath=".\externals\coolprop\CoolProp\REFPROP.cpp"
+				>
+			</File>
+			<File
+				RelativePath=".\externals\coolprop\CoolProp\REFPROP.h"
+				>
+			</File>
+			<File
+				RelativePath=".\externals\coolprop\CoolProp\REFPROP_lib.h"
+				>
+			</File>
+			<File
+				RelativePath=".\externals\coolprop\CoolProp\Solvers.cpp"
+				>
+			</File>
+			<File
+				RelativePath=".\externals\coolprop\CoolProp\Solvers.h"
+				>
+			</File>
+			<File
+				RelativePath=".\externals\coolprop\CoolProp\Spline.cpp"
+				>
+			</File>
+			<File
+				RelativePath=".\externals\coolprop\CoolProp\Spline.h"
+				>
+			</File>
+			<File
+				RelativePath=".\externals\coolprop\CoolProp\TTSE.cpp"
+				>
+			</File>
+			<File
+				RelativePath=".\externals\coolprop\CoolProp\TTSE.h"
+				>
+			</File>
+			<File
+				RelativePath=".\externals\coolprop\CoolProp\Units.cpp"
+				>
+			</File>
+			<File
+				RelativePath=".\externals\coolprop\CoolProp\version.h"
+				>
+			</File>
 		</Filter>
 	</Files>
 	<Globals>
