@@ -34,6 +34,12 @@ public:
 	/// The list of temperatures of the hot stream at cell boundaries
 	std::vector<double> TemperatureList_h;
 
+	/// A vector of booleans for whether cell boundary index corresponds to phase change of the hot stream
+	std::vector<bool> PhaseBoundary_h;
+	
+	/// A vector of booleans for whether cell boundary index corresponds to phase change of the hot stream
+	std::vector<bool> PhaseBoundary_c;
+
 	BrazedPlateHeatExchanger(){this->verbosity = 1;};
 
 	/// Build the list of enthalpies for a given heat transfer rate
@@ -41,9 +47,6 @@ public:
 
 	/// Calculate the saturation states for both streams
 	void SaturationStates();
-
-	/// Get the temperature at each cell boundary
-	std::vector<double> GetTCellBoundaries(CoolPropStateClassSI *State_inlet, std::vector<double> *EnthalpyList);
 
 	/// How verbose the debugging should be [0: no output, 10: very annoying output]
 	int verbosity;

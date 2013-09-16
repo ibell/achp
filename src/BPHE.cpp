@@ -88,22 +88,10 @@ void BrazedPlateHeatExchanger::SaturationStates()
 	State_c_sat.update(iP, State_c_inlet.p(), iQ, 0);
 
 }
-std::vector<double> BrazedPlateHeatExchanger::GetTCellBoundaries(CoolPropStateClassSI *State_inlet, std::vector<double> *EnthalpyList)
-{
-	CoolPropStateClassSI State((*State_inlet).pFluid);
-	
-	// Copy to make T the same size as the EnthalpyList
-	std::vector<double> T = (*EnthalpyList);
-
-	for (int i = 0; i < (int)T.size(); i++)
-	{
-		State.update(iP,(*State_inlet).p(),iH,(*EnthalpyList)[i]);
-		T[i] = State.T();
-	}
-	return T;
-}
 double BrazedPlateHeatExchanger::DetermineQmax()
 {
+	// Check inputs are ok
+	_check();
 	double Qmax;
     // See if each phase could change phase if it were to reach the
     // inlet temperature of the opposite phase 
@@ -132,7 +120,7 @@ double BrazedPlateHeatExchanger::DetermineQmax()
 		return Qmax;
 	}
 
-	// **************** INTERNAL PINCHING *********************
+	// **************** CHECK INTERNAL PINCHING *********************
 	/*
 	Because we have made it this far, it means that there is the possibility that 
 	one or both of the fluids might change phase in the BPHE.  Even so, at this
@@ -151,8 +139,8 @@ double BrazedPlateHeatExchanger::DetermineQmax()
 
 	// Now compare the temperatures at each internal cell boundary
 	bool _internal_pinching = false;
-	std::vector<double> pinching_indices;
-	for (int i = 0; i < (int)TemperatureList_c.size(); i++)
+	std::vector<int> pinching_indices;
+	for (int i = 1; i < (int)TemperatureList_c.size()-1; i++)
 	{
 		// Internal pinching if the temperature of the cold stream at the cell boundary is hotter 
 		// than the hot stream
@@ -162,16 +150,74 @@ double BrazedPlateHeatExchanger::DetermineQmax()
 			pinching_indices.push_back(i);
 		}
 	}
-	if (!_internal_pinching)
+	
+	// If no internal pinch points, you are done, return the externally pinched heat transfer rate
+	if (!_internal_pinching){ return Qmax; }
+
+	//
+
+	// **************** APPLY INTERNAL PINCHING *********************
+	switch(pinching_indices.size())
 	{
-		std::cout << Qmax << std::endl;
-		return Qmax; 
+	case 1:
+		{
+			// One internal pinching point
+			int iR = EnthalpyList_c.size()-2;
+			int iL = 1;
+			
+			// Check if the internal pinching point corresponds to a phase change
+			// of the hot fluid in the right-most cell.  In this case we know 
+			// the heat transfer rate in the right-most cell because the hot fluid goes from
+			// the inlet state to the saturation state
+			if (pinching_indices[0] ==  iR)
+			{
+				if (PhaseBoundary_h[iR] && !PhaseBoundary_c[iR])
+				{
+					// Hot stream is cooling to phase boundary
+					double Qcell = this->mdot_h*(EnthalpyList_h[iR+1]-EnthalpyList_h[iR]);
+					// Calculate the new phase boundary for the cold fluid
+					State_c_max.update(iT,TemperatureList_h[iR],iP,this->State_c_inlet.p());
+					double Qadd = this->mdot_c*(State_c_max.h()-this->State_c_inlet.h());
+					return Qadd + Qcell;
+				}
+				else if (PhaseBoundary_c[iR] && !PhaseBoundary_h[iR])
+				{
+					throw ValueError("one internal pinching point, index is iR, but hot not changing phase");
+				}
+			}
+			// Check if the internal pinching point corresponds to a phase change
+			// of the cold fluid in the left-most cell.  In this case we know 
+			// the heat transfer rate in the left-most cell because the cold fluid goes from
+			// the inlet state to the saturation state
+			else if (pinching_indices[0] ==  iL)
+			{
+				if (PhaseBoundary_c[iL] && !PhaseBoundary_h[iL])
+				{
+					// Cold stream is heating to phase boundary
+					double Qcell = this->mdot_c*(EnthalpyList_c[iL]-EnthalpyList_c[iL-1]);
+					State_h_max.update(iT,TemperatureList_c[iL],iP,this->State_h_inlet.p());
+					double Qadd = this->mdot_h*(this->State_h_inlet.h()-State_h_max.h());
+					return Qadd + Qcell;
+				}
+				else if (PhaseBoundary_h[iL] && !PhaseBoundary_c[iL])
+				{
+					throw ValueError("one internal pinching point, index is iL, but cold not changing phase");
+				}
+			}
+			else
+			{
+				throw ValueError("one internal pinching pint, but index not 1 or iR");
+			}
+		}
+		break;
+	case 2:
+		throw ValueError(format("For now, less than 2 internal pinch points are supported"));
+	default:
+		throw ValueError(format("For now, 2 or less internal pinch points are supported"));
+
 	}
-	else
-	{
-		std::cout << "Internal pinching" << " " << pinching_indices.size() << std::endl;
-		return Qmax;
-	}
+
+	
 	return Qmax;
  //  	
 	//double rr = 0; 
@@ -286,6 +332,9 @@ void BrazedPlateHeatExchanger::BuildEnthalpyLists(double Q)
 	this->EnthalpyList_c.resize(2);
 	this->EnthalpyList_c[0] = hin_c;
 	this->EnthalpyList_c[1] = hin_c + Q/this->mdot_c;
+	// Build the phase boundary vectors
+	this->PhaseBoundary_c = std::vector<bool>(2,false);
+	this->PhaseBoundary_h = std::vector<bool>(2,false);
 
 	// Calculate the states at the outlet of the heat exchanger
 	State_h_outlet.update(iP,this->State_h_inlet.p(),iH,this->EnthalpyList_h[0]);
@@ -311,11 +360,13 @@ void BrazedPlateHeatExchanger::BuildEnthalpyLists(double Q)
 	{
         EnthalpyList_c.insert(EnthalpyList_c.begin()+1, hsatV_c);
 		TemperatureList_c.insert(TemperatureList_c.begin()+1, TsatV_c);
+		PhaseBoundary_c.insert(PhaseBoundary_c.begin()+1, true);
 	}
     if (hsatL_c < EnthalpyList_c[1] && hsatL_c > EnthalpyList_c[0])
 	{
         EnthalpyList_c.insert(EnthalpyList_c.begin()+1, hsatL_c);
 		TemperatureList_c.insert(TemperatureList_c.begin()+1, TsatL_c);
+		PhaseBoundary_c.insert(PhaseBoundary_c.begin()+1, true);
 	}
         
 	double hsatV_h = this->State_h_sat.hV();
@@ -326,11 +377,13 @@ void BrazedPlateHeatExchanger::BuildEnthalpyLists(double Q)
 	{
 		EnthalpyList_h.insert(EnthalpyList_h.begin()+1, hsatV_h);
 		TemperatureList_h.insert(TemperatureList_h.begin()+1, TsatL_h);
+		PhaseBoundary_h.insert(PhaseBoundary_h.begin()+1, true);
 	}
     if (hsatL_h < EnthalpyList_h[1] && hsatL_h > EnthalpyList_h[0])
 	{
         EnthalpyList_h.insert(EnthalpyList_h.begin()+1, hsatL_h);
 		TemperatureList_h.insert(TemperatureList_h.begin()+1, TsatL_h);
+		PhaseBoundary_h.insert(PhaseBoundary_h.begin()+1, true);
 	}
 
 	// Now we need to find the complementary phase boundaries for each cell boundary
@@ -347,6 +400,7 @@ void BrazedPlateHeatExchanger::BuildEnthalpyLists(double Q)
 			State_c.update(iP,this->State_c_inlet.p(),iH,EnthalpyList_c[I]+Qbound_h/this->mdot_c);
 			TemperatureList_c.insert(TemperatureList_c.begin()+I+1, State_c.T());
             EnthalpyList_c.insert(EnthalpyList_c.begin()+I+1, EnthalpyList_c[I]+Qbound_h/this->mdot_c);
+			PhaseBoundary_c.insert(PhaseBoundary_c.begin()+I+1, false);
 		}
         else if (Qbound_h > Qbound_c+1e-9)
 		{
@@ -355,6 +409,7 @@ void BrazedPlateHeatExchanger::BuildEnthalpyLists(double Q)
 			State_h.update(iP,this->State_h_inlet.p(),iH,EnthalpyList_h[I]+Qbound_c/this->mdot_h);
 			TemperatureList_h.insert(TemperatureList_h.begin()+I+1, State_h.T());
             EnthalpyList_h.insert(EnthalpyList_h.begin()+I+1, EnthalpyList_h[I]+Qbound_c/this->mdot_h);
+			PhaseBoundary_h.insert(PhaseBoundary_h.begin()+I+1, false);
 		}
         I += 1;
 	}
@@ -1274,11 +1329,8 @@ void BrazedPlateHeatExchanger::test()
 	this->mdot_h = 0.03;
 	
 	this->State_c_inlet = CoolPropStateClassSI("Water");
-	this->State_c_inlet.update(iT,295,iP,101325);
+	this->State_c_inlet.update(iT,280,iP,101325);
 	this->mdot_c = 3.0;
-
-	double d = Props("P",'T',300,'Q',0,"REFPROP-Propane");
-	double rrr = 0;
 }
 //def Evaporator_Datapoints():
 //        

@@ -11,7 +11,7 @@ int main()
 	{
 		BPHE.mdot_c = mdot;
 		BPHE.SaturationStates();
-		BPHE.calculate();
+		std::cout << mdot << " " << BPHE.DetermineQmax() << std::endl;
 	}
 
 	CompressorClass C = CompressorClass();
