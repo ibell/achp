@@ -6,12 +6,21 @@ int main()
 {
 
 	BrazedPlateHeatExchanger BPHE = BrazedPlateHeatExchanger();
+	//BPHE.test();
+	//for (double mdot = 0.0001; mdot < 0.1; mdot += 0.0001)
+	//{
+	//	BPHE.mdot_c = mdot;
+	//	BPHE.SaturationStates();
+	//	std::cout << mdot << " " << BPHE.calculate() << std::endl;
+	//}
+
+	BPHE = BrazedPlateHeatExchanger();
 	BPHE.test();
-	for (double mdot = 0.001; mdot < 0.1; mdot += 0.001)
+	for (double mdot = 0.0001; mdot < 0.1; mdot += 0.0001)
 	{
 		BPHE.mdot_c = mdot;
-		BPHE.SaturationStates();
-		std::cout << mdot << " " << BPHE.DetermineQmax() << std::endl;
+		BPHE.calculate();
+		//std::cout << mdot << " " << BPHE.calculate() << std::endl;
 	}
 
 	CompressorClass C = CompressorClass();

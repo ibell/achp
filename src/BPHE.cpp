@@ -1,5 +1,7 @@
-#include "CPState.h"
+
 #include "BPHE.h"
+#include "CoolProp/CPState.h"
+#include "CoolProp/Solvers.h"
 #include <algorithm>
 
 //class PHEHXClass():
@@ -62,13 +64,24 @@ void BrazedPlateHeatExchanger::_check()
 {
 	if (this->State_h_inlet.T() < this->State_c_inlet.T())
 	{
-		if (this->verbosity > 0)
-		{
-			std::cout << format("Cold stream inlet temperature [%g K] is above hot stream inlet temperature [%g K]",this->State_c_inlet.T(), this->State_h_inlet.T()).c_str() << std::endl;
-		}
-		throw ValueError(format("Cold stream inlet temperature [%g K] is above hot stream inlet temperature [%g K]",this->State_c_inlet.T(), this->State_h_inlet.T()).c_str());
+		std::string err = format("Cold stream inlet temperature [%g K] is above hot stream inlet temperature [%g K]",this->State_c_inlet.T(), this->State_h_inlet.T());
+		if (this->verbosity > 0){ std::cout << err.c_str() << std::endl; }
+		throw ValueError(err.c_str());
+	}
+	if (this->State_h_inlet.p() > this->State_h_inlet.keyed_output(iPcrit))
+	{
+		std::string err = format("Hot stream pressure is supercritical (not currently permitted) ",this->State_c_inlet.T(), this->State_h_inlet.T()); 
+		if (this->verbosity > 0) { std::cout << err.c_str() << std::endl; }
+		throw ValueError(err.c_str());
+	}
+	if (this->State_c_inlet.p() > this->State_c_inlet.keyed_output(iPcrit))
+	{
+		std::string err = format("Cold stream pressure is supercritical (not currently permitted) ",this->State_c_inlet.T(), this->State_h_inlet.T()); 
+		if (this->verbosity > 0) { std::cout << err.c_str() << std::endl; }
+		throw ValueError(err.c_str());
 	}
 }
+
 void BrazedPlateHeatExchanger::calculate()
 {
 	// Check that the inputs are ok
@@ -77,7 +90,31 @@ void BrazedPlateHeatExchanger::calculate()
 	this->SaturationStates();
 	// Determine the maximum heat transfer rate considering internal and external pinching
 	double Qmax = this->DetermineQmax();
+	// Now actually calculate the heat transfer rate since we know the heat transfer rate is 
+	// bound between 0 and Qmax
+	this->CalculateQ(Qmax);
 };
+
+class HeatTransferObjectiveFunction : public FuncWrapper1D
+{
+protected:
+	BrazedPlateHeatExchanger *BPHE;
+public:
+	HeatTransferObjectiveFunction(BrazedPlateHeatExchanger *BPHE){this->BPHE = BPHE;};
+	double call(double Q)
+	{
+		std::vector<BPHECell> CellList;
+		
+		return 0;
+	};
+};
+
+void BrazedPlateHeatExchanger::CalculateQ(double Qmax)
+{
+	HeatTransferObjectiveFunction HTOF(this);
+	std::string errstr;
+	Brent(&HTOF,0,Qmax,1e-16,1e-8,30,&errstr);
+}
 
 void BrazedPlateHeatExchanger::SaturationStates()
 {
@@ -86,7 +123,6 @@ void BrazedPlateHeatExchanger::SaturationStates()
 
 	State_h_sat.update(iP, State_h_inlet.p(), iQ, 0);
 	State_c_sat.update(iP, State_c_inlet.p(), iQ, 0);
-
 }
 double BrazedPlateHeatExchanger::DetermineQmax()
 {
@@ -154,8 +190,6 @@ double BrazedPlateHeatExchanger::DetermineQmax()
 	// If no internal pinch points, you are done, return the externally pinched heat transfer rate
 	if (!_internal_pinching){ return Qmax; }
 
-	//
-
 	// **************** APPLY INTERNAL PINCHING *********************
 	switch(pinching_indices.size())
 	{
@@ -214,10 +248,7 @@ double BrazedPlateHeatExchanger::DetermineQmax()
 		throw ValueError(format("For now, less than 2 internal pinch points are supported"));
 	default:
 		throw ValueError(format("For now, 2 or less internal pinch points are supported"));
-
 	}
-
-	
 	return Qmax;
  //  	
 	//double rr = 0; 
@@ -250,37 +281,8 @@ double BrazedPlateHeatExchanger::DetermineQmax()
 //                             self.mdot_c*(hpinch_c - self.hin_c) + self.mdot_h*(self.hin_h - self.hsatV_h))
 //        
 //        print 'Qmax_new_check =', Qmax_new_check
-//        
-//    else: #I had to add the 1e-6 tolerance because otherwise the test could return false.  Checking quality would be better maybe?
-//        if TList_c[0]+1e-6 < self.Tbubble_c <= TList_c[-1]+1e-6:  #then there is a cold fluid phase change boundary at the bubble point that could result in a hot fluid pinch point 
-//            i = 0
-//            while TList_c[i] < self.Tbubble_c-1e-9:  #find the boundary where the cold fluid changes phase
-//                i+=1
-//            if (self.Tbubble_c > TList_h[i]):  #hot fluid pinch point
-//                hpinch = Props('H','T',self.Tbubble_c,'P',self.pin_h,self.Ref_h)*1000
-//                Qmax_new = self.mdot_h*(self.hin_h - hpinch) + self.mdot_c*(self.hsatL_c - self.hin_c)
-//            
-//        if TList_h[0]-1e-6 <= self.Tdew_h < TList_h[-1]-1e-6:  #then there is a hot fluid phase change boundary at the dew point that could result in a cold fluid pinch point
-//            i = len(TList_h)-1
-//            while TList_h[i] > self.Tdew_h+1e-9:
-//                i-=1
-//            if (self.Tdew_h < TList_c[i]): #cold fluid pinch point          
-//                hpinch = Props('H','T',self.Tdew_h,'P',self.pin_c,self.Ref_c)*1000
-//                Qmax_new = self.mdot_c*(hpinch - self.hin_c) + self.mdot_h*(self.hin_h - self.hsatV_h)
-//        
-//    print 'Qmax =', Qmax
-//    print 'Qmax_new =', Qmax_new
-//    if Qmax_new:
-//        assert(abs(Qmax_new) <= abs(Qmax))
-//        Qmax = Qmax_new 
-//        EnthalpyList_c,EnthalpyList_h=self.BuildEnthalpyLists(Qmax)  #Rebuild the enthalpy list so we can plot it
-//        #Rebuild the temperature list
-//        TList_c=np.zeros_like(EnthalpyList_c)
-//        TList_h=np.zeros_like(EnthalpyList_h)
-//        for i in range(len(EnthalpyList_h)):
-//            TList_c[i] = TrhoPhase_ph(self.Ref_c,self.pin_c,EnthalpyList_c[i],self.Tbubble_c,self.Tdew_c,self.rhosatL_c,self.rhosatV_c)[0]
-//            TList_h[i] = TrhoPhase_ph(self.Ref_h,self.pin_h,EnthalpyList_h[i],self.Tbubble_h,self.Tdew_h,self.rhosatL_h,self.rhosatV_h)[0]
-//     
+
+
 //    #Here we will plot a qualitative look at what the temperature profiles would be for maximum heat transfer
 //    #The abscissa is dimensionless enthalpy so it doesn't show us how long each section is in the physical heat exchanger
 //    figure()
@@ -388,7 +390,7 @@ void BrazedPlateHeatExchanger::BuildEnthalpyLists(double Q)
 
 	// Now we need to find the complementary phase boundaries for each cell boundary
     int I=0;
-	while (I < (int)(EnthalpyList_h.size())-1)
+	while (EnthalpyList_c.size() != EnthalpyList_h.size())
 	{
         // Try to figure out whether the next phase transition is on the hot or cold side     
         double Qbound_h = this->mdot_h*(EnthalpyList_h[I+1]-EnthalpyList_h[I]);
@@ -396,178 +398,71 @@ void BrazedPlateHeatExchanger::BuildEnthalpyLists(double Q)
         if (Qbound_h < Qbound_c-1e-9)
 		{
             // Minimum amount of heat transfer is on the hot side,
-            // add another entry to EnthalpyList_c
-			State_c.update(iP,this->State_c_inlet.p(),iH,EnthalpyList_c[I]+Qbound_h/this->mdot_c);
+            // add another entry to EnthalpyList_c at the interface
+			double h = EnthalpyList_c[I]+Qbound_h/this->mdot_c;
+			State_c.update(iP,this->State_c_inlet.p(),iH,h);
 			TemperatureList_c.insert(TemperatureList_c.begin()+I+1, State_c.T());
-            EnthalpyList_c.insert(EnthalpyList_c.begin()+I+1, EnthalpyList_c[I]+Qbound_h/this->mdot_c);
+            EnthalpyList_c.insert(EnthalpyList_c.begin()+I+1, h);
 			PhaseBoundary_c.insert(PhaseBoundary_c.begin()+I+1, false);
 		}
         else if (Qbound_h > Qbound_c+1e-9)
 		{
             // Minimum amount of heat transfer is on the cold side,
             // add another entry to EnthalpyList_h at the interface
-			State_h.update(iP,this->State_h_inlet.p(),iH,EnthalpyList_h[I]+Qbound_c/this->mdot_h);
+			double h = EnthalpyList_h[I]+Qbound_c/this->mdot_h;
+			// Update the state using this P,H value
+			State_h.update(iP,this->State_h_inlet.p(),iH,h);
 			TemperatureList_h.insert(TemperatureList_h.begin()+I+1, State_h.T());
-            EnthalpyList_h.insert(EnthalpyList_h.begin()+I+1, EnthalpyList_h[I]+Qbound_c/this->mdot_h);
+            EnthalpyList_h.insert(EnthalpyList_h.begin()+I+1, h);
 			PhaseBoundary_h.insert(PhaseBoundary_h.begin()+I+1, false);
 		}
         I += 1;
 	}
+
+	// Now we need to find the phases for each cell
+	// Warning: indices of cells are offset by one from the indices of the cell boundaries
+	CellPhaseList_h = std::vector<int>(EnthalpyList_h.size()-1,-1);
+	CellPhaseList_c = std::vector<int>(EnthalpyList_c.size()-1,-1);
+	for (int i = 0; i < CellPhaseList_h.size(); i++)
+	{
+		// Mean enthalpy of each cell
+		double hmean_h = (EnthalpyList_h[i] + EnthalpyList_h[i+1])/2.0;
+		
+		// Check what the phase is based on the mean enthalpy
+		if (hmean_h < hsatL_h){ 
+			CellPhaseList_h[i] = iLiquid;
+		}
+		else if (hmean_h > hsatV_h){
+			CellPhaseList_h[i] = iGas;
+		}
+		else if (hmean_h > hsatL_h && hmean_h < hsatV_h)
+		{
+			CellPhaseList_h[i] = iTwoPhase;
+		}
+		else
+		{
+			throw ValueError(format("Enthalpy of the hot stream [%g J/kg] is not liquid, gas or two-phase", hmean_h));
+		}
+
+		double hmean_c = (EnthalpyList_c[i] + EnthalpyList_c[i+1])/2.0;
+		// Check what the phase is based on the mean enthalpy
+		if (hmean_c < hsatL_c){ 
+			CellPhaseList_c[i] = iLiquid;
+		}
+		else if (hmean_c > hsatV_c){
+			CellPhaseList_c[i] = iGas;
+		}
+		else if (hmean_c > hsatL_c && hmean_c < hsatV_c)
+		{
+			CellPhaseList_c[i] = iTwoPhase;
+		}
+		else
+		{
+			throw ValueError(format("Enthalpy of the cold stream [%g J/kg] is not liquid, gas or two-phase", hmean_c));
+		}
+	}
 }
 
-//    def PostProcess(self,cellList):
-//        """
-//        Combine all the cells to calculate overall parameters like pressure drop
-//        and fraction of heat exchanger in two-phase on both sides
-//        """
-//        def collect(cellList,tag,tagvalue,out):
-//            collectList=[]
-//            for cell in cellList:
-//                if cell[tag]==tagvalue:
-//                    collectList.append(cell[out])
-//            return collectList
-//        self.DP_c=0
-//        self.DP_c_superheat=0
-//        self.DP_c_2phase=0
-//        self.DP_c_subcooled=0
-//        self.DP_h=0
-//        self.DP_h_superheat=0
-//        self.DP_h_2phase=0
-//        self.DP_h_subcooled=0
-//        self.Charge_c=0
-//        self.Charge_h=0
-//        for cell in cellList:
-//            self.DP_c+=cell['DP_c']
-//            self.DP_h+=cell['DP_h']
-//            self.Charge_c+=cell['Charge_c']
-//            self.Charge_h+=cell['Charge_h']
-//        self.w_superheated_h=sum(collect(cellList,'Phase_h','Superheated','w'))
-//        self.w_2phase_h=sum(collect(cellList,'Phase_h','TwoPhase','w'))
-//        self.w_subcooled_h=sum(collect(cellList,'Phase_h','Subcooled','w'))
-//        self.w_superheated_c=sum(collect(cellList,'Phase_c','Superheated','w'))
-//        self.w_2phase_c=sum(collect(cellList,'Phase_c','TwoPhase','w'))
-//        self.w_subcooled_c=sum(collect(cellList,'Phase_c','Subcooled','w'))
-//        
-//        self.DP_superheated_c=sum(collect(cellList,'Phase_c','Superheated','DP_c'))
-//        self.DP_2phase_c=sum(collect(cellList,'Phase_c','TwoPhase','DP_c'))
-//        self.DP_subcooled_c=sum(collect(cellList,'Phase_c','Subcooled','DP_c'))
-//        self.DP_c=self.DP_superheated_c+self.DP_2phase_c+self.DP_subcooled_c
-//        
-//        self.DP_superheated_h=sum(collect(cellList,'Phase_h','Superheated','DP_h'))
-//        self.DP_2phase_h=sum(collect(cellList,'Phase_h','TwoPhase','DP_h'))
-//        self.DP_subcooled_h=sum(collect(cellList,'Phase_h','Subcooled','DP_h'))
-//        self.DP_h=self.DP_superheated_h+self.DP_2phase_h+self.DP_subcooled_h
-//        
-//        self.Charge_superheated_c=sum(collect(cellList,'Phase_c','Superheated','Charge_c'))
-//        self.Charge_2phase_c=sum(collect(cellList,'Phase_c','TwoPhase','Charge_c'))
-//        self.Charge_subcooled_c=sum(collect(cellList,'Phase_c','Subcooled','Charge_c'))
-//        self.Charge_c=self.Charge_superheated_c+self.Charge_2phase_c+self.Charge_subcooled_c
-//        self.Charge_superheated_h=sum(collect(cellList,'Phase_h','Superheated','Charge_h'))
-//        self.Charge_2phase_h=sum(collect(cellList,'Phase_h','TwoPhase','Charge_h'))
-//        self.Charge_subcooled_h=sum(collect(cellList,'Phase_h','Subcooled','Charge_h'))
-//        self.Charge_h=self.Charge_superheated_h+self.Charge_2phase_h+self.Charge_subcooled_h
-//        
-//        self.Q_superheated_h=sum(collect(cellList,'Phase_h','Superheated','Q'))
-//        self.Q_2phase_h=sum(collect(cellList,'Phase_h','TwoPhase','Q'))
-//        self.Q_subcooled_h=sum(collect(cellList,'Phase_h','Subcooled','Q'))
-//        self.Q_superheated_c=sum(collect(cellList,'Phase_c','Superheated','Q'))
-//        self.Q_2phase_c=sum(collect(cellList,'Phase_c','TwoPhase','Q'))
-//        self.Q_subcooled_c=sum(collect(cellList,'Phase_c','Subcooled','Q'))
-//        
-//        w_superheat=collect(cellList,'Phase_c','Superheated','w')
-//        w_2phase=collect(cellList,'Phase_c','TwoPhase','w')
-//        h_c_sh=collect(cellList,'Phase_c','Superheated','h_c')
-//        h_c_2phase=collect(cellList,'Phase_c','TwoPhase','h_c')
-//        self.xout_h=collect(cellList,'Phase_h','TwoPhase','xout_h')
-//        
-//        if len(w_superheat)>0:
-//            self.h_superheated_c=float(sum(np.array(h_c_sh)*np.array(w_superheat))/sum(w_superheat))
-//        else:
-//            self.h_superheated_c=0
-//            
-//        if len(w_2phase)>0:
-//            self.h_2phase_c=float(sum(np.array(h_c_2phase)*np.array(w_2phase))/sum(w_2phase))
-//        else:
-//            self.h_2phase_c=0
-//            
-//        ### Collect all the cells on the hot side
-//        w_subcooled_h=collect(cellList,'Phase_h','Subcooled','w')
-//        w_superheat_h=collect(cellList,'Phase_h','Superheated','w')
-//        w_2phase_h=collect(cellList,'Phase_h','TwoPhase','w')
-//        h_h_sh=collect(cellList,'Phase_h','Superheated','h_h')
-//        h_h_2phase=collect(cellList,'Phase_h','TwoPhase','h_h')
-//        h_h_subcool=collect(cellList,'Phase_h','Subcooled','h_h')
-//        
-//        w_subcooled_c=collect(cellList,'Phase_c','Subcooled','w')
-//        w_superheat_c=collect(cellList,'Phase_c','Superheated','w')
-//        w_2phase_c=collect(cellList,'Phase_c','TwoPhase','w')
-//        h_c_sh=collect(cellList,'Phase_c','Superheated','h_c')
-//        h_c_2phase=collect(cellList,'Phase_c','TwoPhase','h_c')
-//        h_c_subcool=collect(cellList,'Phase_c','Subcooled','h_c')
-//        
-//        if len(w_subcooled_h)>0:
-//            self.h_subcooled_h=float(sum(np.array(h_h_subcool)*np.array(w_subcooled_h))/sum(w_subcooled_h))
-//        else:
-//            self.h_subcooled_h=0
-//        
-//        if len(w_2phase_h)>0:
-//            self.h_2phase_h=float(sum(np.array(h_h_2phase)*np.array(w_2phase_h))/sum(w_2phase_h))
-//        else:
-//            self.h_2phase_h=0
-//            
-//        if len(w_superheat_h)>0:
-//            self.h_superheated_h=float(sum(np.array(h_h_sh)*np.array(w_superheat_h))/sum(w_superheat_h))
-//        else:
-//            self.h_superheated_h=0
-//            
-//        if len(w_subcooled_c)>0:
-//            self.h_subcooled_c=float(sum(np.array(h_c_subcool)*np.array(w_subcooled_c))/sum(w_subcooled_c))
-//        else:
-//            self.h_subcooled_c=0
-//        
-//        if len(w_2phase_c)>0:
-//            self.h_2phase_c=float(sum(np.array(h_c_2phase)*np.array(w_2phase_c))/sum(w_2phase_c))
-//        else:
-//            self.h_2phase_c=0
-//            
-//        if len(w_superheat_c)>0:
-//            self.h_superheated_c=float(sum(np.array(h_c_sh)*np.array(w_superheat_c))/sum(w_superheat_c))
-//        else:
-//            self.h_superheated_c=0
-//            
-//        
-//        
-//        self.q_flux=collect(cellList,'Phase_c','TwoPhase','q_flux')
-//            
-//        self.Tout_h,self.rhoout_h=TrhoPhase_ph(self.Ref_h,self.pin_h,self.hout_h,self.Tbubble_h,self.Tdew_h,self.rhosatL_h,self.rhosatV_h)[0:2]
-//        self.Tout_c,self.rhoout_c=TrhoPhase_ph(self.Ref_c,self.pin_c,self.hout_c,self.Tbubble_c,self.Tdew_c,self.rhosatL_c,self.rhosatV_c)[0:2]
-//        
-//        if IsFluidType(self.Ref_c,'Brine'):
-//            self.sout_c=Props('S','T',self.Tout_c,'P',self.pin_c,self.Ref_c)*1000
-//            self.DT_sc_c=1e9
-//        else:
-//            self.sout_c=Props('S','T',self.Tout_c,'D',self.rhoout_c,self.Ref_c)*1000
-//            #Effective subcooling for both streams
-//            hsatL=Props('H','T',self.Tbubble_c,'Q',0,self.Ref_c)*1000
-//            cpsatL=Props('C','T',self.Tbubble_c,'Q',0,self.Ref_c)*1000
-//            if self.hout_c>hsatL:
-//                #Outlet is at some quality on cold side
-//                self.DT_sc_c=-(self.hout_c-hsatL)/cpsatL
-//            else:
-//                self.DT_sc_c=self.Tbubble_c-self.Tout_c
-//        
-//        if IsFluidType(self.Ref_h,'Brine'):
-//            self.sout_h=Props('S','T',self.Tout_h,'P',self.pin_h,self.Ref_h)*1000
-//            self.DT_sc_h=1e9
-//        else:
-//            self.sout_h=Props('S','T',self.Tout_h,'D',self.rhoout_h,self.Ref_h)*1000
-//            hsatV=Props('H','T',self.Tdew_h,'Q',0,self.Ref_h)*1000
-//            cpsatV=Props('C','T',self.Tdew_h,'Q',0,self.Ref_h)*1000
-//            if self.hout_h<hsatV:
-//                #Outlet is at some quality on hot side
-//                self.DT_sc_h=-(hsatV-self.hout_h)/cpsatV
-//            else:
-//                self.DT_sc_h=self.Tout_h - self.Tbubble_h
 //        
 //    def eNTU_CounterFlow(self,Cr,Ntu):
 //        return ((1 - exp(-Ntu * (1 - Cr))) / 
@@ -1328,10 +1223,56 @@ void BrazedPlateHeatExchanger::test()
 	this->State_h_inlet.update(iT,360,iP,this->State_h_inlet.p());
 	this->mdot_h = 0.03;
 	
-	this->State_c_inlet = CoolPropStateClassSI("Water");
-	this->State_c_inlet.update(iT,280,iP,101325);
+	this->State_c_inlet = CoolPropStateClassSI("Propane");
+	this->State_c_inlet.update(iT,280,iQ,0.0);
+	this->State_c_inlet.update(iT,260,iP,this->State_c_inlet.p());
 	this->mdot_c = 3.0;
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 //def Evaporator_Datapoints():
 //        
 //    Tin_h_list=[115.6641168]
@@ -1503,3 +1444,162 @@ void BrazedPlateHeatExchanger::test()
 //        show()
 //        
 //        i += 1
+
+
+
+
+
+
+//    def PostProcess(self,cellList):
+//        """
+//        Combine all the cells to calculate overall parameters like pressure drop
+//        and fraction of heat exchanger in two-phase on both sides
+//        """
+//        def collect(cellList,tag,tagvalue,out):
+//            collectList=[]
+//            for cell in cellList:
+//                if cell[tag]==tagvalue:
+//                    collectList.append(cell[out])
+//            return collectList
+//        self.DP_c=0
+//        self.DP_c_superheat=0
+//        self.DP_c_2phase=0
+//        self.DP_c_subcooled=0
+//        self.DP_h=0
+//        self.DP_h_superheat=0
+//        self.DP_h_2phase=0
+//        self.DP_h_subcooled=0
+//        self.Charge_c=0
+//        self.Charge_h=0
+//        for cell in cellList:
+//            self.DP_c+=cell['DP_c']
+//            self.DP_h+=cell['DP_h']
+//            self.Charge_c+=cell['Charge_c']
+//            self.Charge_h+=cell['Charge_h']
+//        self.w_superheated_h=sum(collect(cellList,'Phase_h','Superheated','w'))
+//        self.w_2phase_h=sum(collect(cellList,'Phase_h','TwoPhase','w'))
+//        self.w_subcooled_h=sum(collect(cellList,'Phase_h','Subcooled','w'))
+//        self.w_superheated_c=sum(collect(cellList,'Phase_c','Superheated','w'))
+//        self.w_2phase_c=sum(collect(cellList,'Phase_c','TwoPhase','w'))
+//        self.w_subcooled_c=sum(collect(cellList,'Phase_c','Subcooled','w'))
+//        
+//        self.DP_superheated_c=sum(collect(cellList,'Phase_c','Superheated','DP_c'))
+//        self.DP_2phase_c=sum(collect(cellList,'Phase_c','TwoPhase','DP_c'))
+//        self.DP_subcooled_c=sum(collect(cellList,'Phase_c','Subcooled','DP_c'))
+//        self.DP_c=self.DP_superheated_c+self.DP_2phase_c+self.DP_subcooled_c
+//        
+//        self.DP_superheated_h=sum(collect(cellList,'Phase_h','Superheated','DP_h'))
+//        self.DP_2phase_h=sum(collect(cellList,'Phase_h','TwoPhase','DP_h'))
+//        self.DP_subcooled_h=sum(collect(cellList,'Phase_h','Subcooled','DP_h'))
+//        self.DP_h=self.DP_superheated_h+self.DP_2phase_h+self.DP_subcooled_h
+//        
+//        self.Charge_superheated_c=sum(collect(cellList,'Phase_c','Superheated','Charge_c'))
+//        self.Charge_2phase_c=sum(collect(cellList,'Phase_c','TwoPhase','Charge_c'))
+//        self.Charge_subcooled_c=sum(collect(cellList,'Phase_c','Subcooled','Charge_c'))
+//        self.Charge_c=self.Charge_superheated_c+self.Charge_2phase_c+self.Charge_subcooled_c
+//        self.Charge_superheated_h=sum(collect(cellList,'Phase_h','Superheated','Charge_h'))
+//        self.Charge_2phase_h=sum(collect(cellList,'Phase_h','TwoPhase','Charge_h'))
+//        self.Charge_subcooled_h=sum(collect(cellList,'Phase_h','Subcooled','Charge_h'))
+//        self.Charge_h=self.Charge_superheated_h+self.Charge_2phase_h+self.Charge_subcooled_h
+//        
+//        self.Q_superheated_h=sum(collect(cellList,'Phase_h','Superheated','Q'))
+//        self.Q_2phase_h=sum(collect(cellList,'Phase_h','TwoPhase','Q'))
+//        self.Q_subcooled_h=sum(collect(cellList,'Phase_h','Subcooled','Q'))
+//        self.Q_superheated_c=sum(collect(cellList,'Phase_c','Superheated','Q'))
+//        self.Q_2phase_c=sum(collect(cellList,'Phase_c','TwoPhase','Q'))
+//        self.Q_subcooled_c=sum(collect(cellList,'Phase_c','Subcooled','Q'))
+//        
+//        w_superheat=collect(cellList,'Phase_c','Superheated','w')
+//        w_2phase=collect(cellList,'Phase_c','TwoPhase','w')
+//        h_c_sh=collect(cellList,'Phase_c','Superheated','h_c')
+//        h_c_2phase=collect(cellList,'Phase_c','TwoPhase','h_c')
+//        self.xout_h=collect(cellList,'Phase_h','TwoPhase','xout_h')
+//        
+//        if len(w_superheat)>0:
+//            self.h_superheated_c=float(sum(np.array(h_c_sh)*np.array(w_superheat))/sum(w_superheat))
+//        else:
+//            self.h_superheated_c=0
+//            
+//        if len(w_2phase)>0:
+//            self.h_2phase_c=float(sum(np.array(h_c_2phase)*np.array(w_2phase))/sum(w_2phase))
+//        else:
+//            self.h_2phase_c=0
+//            
+//        ### Collect all the cells on the hot side
+//        w_subcooled_h=collect(cellList,'Phase_h','Subcooled','w')
+//        w_superheat_h=collect(cellList,'Phase_h','Superheated','w')
+//        w_2phase_h=collect(cellList,'Phase_h','TwoPhase','w')
+//        h_h_sh=collect(cellList,'Phase_h','Superheated','h_h')
+//        h_h_2phase=collect(cellList,'Phase_h','TwoPhase','h_h')
+//        h_h_subcool=collect(cellList,'Phase_h','Subcooled','h_h')
+//        
+//        w_subcooled_c=collect(cellList,'Phase_c','Subcooled','w')
+//        w_superheat_c=collect(cellList,'Phase_c','Superheated','w')
+//        w_2phase_c=collect(cellList,'Phase_c','TwoPhase','w')
+//        h_c_sh=collect(cellList,'Phase_c','Superheated','h_c')
+//        h_c_2phase=collect(cellList,'Phase_c','TwoPhase','h_c')
+//        h_c_subcool=collect(cellList,'Phase_c','Subcooled','h_c')
+//        
+//        if len(w_subcooled_h)>0:
+//            self.h_subcooled_h=float(sum(np.array(h_h_subcool)*np.array(w_subcooled_h))/sum(w_subcooled_h))
+//        else:
+//            self.h_subcooled_h=0
+//        
+//        if len(w_2phase_h)>0:
+//            self.h_2phase_h=float(sum(np.array(h_h_2phase)*np.array(w_2phase_h))/sum(w_2phase_h))
+//        else:
+//            self.h_2phase_h=0
+//            
+//        if len(w_superheat_h)>0:
+//            self.h_superheated_h=float(sum(np.array(h_h_sh)*np.array(w_superheat_h))/sum(w_superheat_h))
+//        else:
+//            self.h_superheated_h=0
+//            
+//        if len(w_subcooled_c)>0:
+//            self.h_subcooled_c=float(sum(np.array(h_c_subcool)*np.array(w_subcooled_c))/sum(w_subcooled_c))
+//        else:
+//            self.h_subcooled_c=0
+//        
+//        if len(w_2phase_c)>0:
+//            self.h_2phase_c=float(sum(np.array(h_c_2phase)*np.array(w_2phase_c))/sum(w_2phase_c))
+//        else:
+//            self.h_2phase_c=0
+//            
+//        if len(w_superheat_c)>0:
+//            self.h_superheated_c=float(sum(np.array(h_c_sh)*np.array(w_superheat_c))/sum(w_superheat_c))
+//        else:
+//            self.h_superheated_c=0
+//            
+//        
+//        
+//        self.q_flux=collect(cellList,'Phase_c','TwoPhase','q_flux')
+//            
+//        self.Tout_h,self.rhoout_h=TrhoPhase_ph(self.Ref_h,self.pin_h,self.hout_h,self.Tbubble_h,self.Tdew_h,self.rhosatL_h,self.rhosatV_h)[0:2]
+//        self.Tout_c,self.rhoout_c=TrhoPhase_ph(self.Ref_c,self.pin_c,self.hout_c,self.Tbubble_c,self.Tdew_c,self.rhosatL_c,self.rhosatV_c)[0:2]
+//        
+//        if IsFluidType(self.Ref_c,'Brine'):
+//            self.sout_c=Props('S','T',self.Tout_c,'P',self.pin_c,self.Ref_c)*1000
+//            self.DT_sc_c=1e9
+//        else:
+//            self.sout_c=Props('S','T',self.Tout_c,'D',self.rhoout_c,self.Ref_c)*1000
+//            #Effective subcooling for both streams
+//            hsatL=Props('H','T',self.Tbubble_c,'Q',0,self.Ref_c)*1000
+//            cpsatL=Props('C','T',self.Tbubble_c,'Q',0,self.Ref_c)*1000
+//            if self.hout_c>hsatL:
+//                #Outlet is at some quality on cold side
+//                self.DT_sc_c=-(self.hout_c-hsatL)/cpsatL
+//            else:
+//                self.DT_sc_c=self.Tbubble_c-self.Tout_c
+//        
+//        if IsFluidType(self.Ref_h,'Brine'):
+//            self.sout_h=Props('S','T',self.Tout_h,'P',self.pin_h,self.Ref_h)*1000
+//            self.DT_sc_h=1e9
+//        else:
+//            self.sout_h=Props('S','T',self.Tout_h,'D',self.rhoout_h,self.Ref_h)*1000
+//            hsatV=Props('H','T',self.Tdew_h,'Q',0,self.Ref_h)*1000
+//            cpsatV=Props('C','T',self.Tdew_h,'Q',0,self.Ref_h)*1000
+//            if self.hout_h<hsatV:
+//                #Outlet is at some quality on hot side
+//                self.DT_sc_h=-(hsatV-self.hout_h)/cpsatV
+//            else:
+//                self.DT_sc_h=self.Tout_h - self.Tbubble_h

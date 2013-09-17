@@ -4,6 +4,10 @@
 class BrazedPlateHeatExchanger
 {
 public:
+
+	/// 
+	BrazedPlateHeatExchanger(){this->verbosity = 1;};
+
 	/// Inlet state for the hot stream
 	CoolPropStateClassSI State_h_inlet;
 		
@@ -40,13 +44,20 @@ public:
 	/// A vector of booleans for whether cell boundary index corresponds to phase change of the hot stream
 	std::vector<bool> PhaseBoundary_c;
 
-	BrazedPlateHeatExchanger(){this->verbosity = 1;};
+	/// A vector of phase indices for the cells on the cold side
+	std::vector<int> CellPhaseList_c;
+
+	/// A vector of phase indices for the cells on the hot side
+	std::vector<int> CellPhaseList_h;
 
 	/// Build the list of enthalpies for a given heat transfer rate
 	void BuildEnthalpyLists(double Q);
 
 	/// Calculate the saturation states for both streams
 	void SaturationStates();
+
+	/// Calculate the actual heat transfer rate
+	void CalculateQ(double Qmax);
 
 	/// How verbose the debugging should be [0: no output, 10: very annoying output]
 	int verbosity;
