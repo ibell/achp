@@ -1,5 +1,5 @@
 
-#include "CoolProp.h"
+#include "CoolProp/CoolProp.h"
 #include "Compressor.h"
 #include "time.h"
 #include "ACHPcore.h"

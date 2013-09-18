@@ -1,6 +1,24 @@
 #ifndef BPHE_H
 #define BPHE_H
 
+#include "CoolProp/CPState.h"
+
+class BPHECell
+{
+public:
+	// The mass of hot fluid
+	double charge_h;
+
+	// The mass of cold fluid
+	double charge_c;
+
+	// The heat transfer coefficient of hot fluid
+	double HTC_h;
+
+	// The heat transfer coefficient of cold fluid
+	double HTC_c;
+};
+
 class BrazedPlateHeatExchanger
 {
 public:

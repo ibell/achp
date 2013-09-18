@@ -42,7 +42,7 @@
 				Name="VCCLCompilerTool"
 				AdditionalOptions=""
 				Optimization="0"
-				AdditionalIncludeDirectories="C:\Users\Belli\Documents\Code\achp_git\externals\coolprop\CoolProp"
+				AdditionalIncludeDirectories="C:\Users\Belli\Documents\Code\achp_git\externals\coolprop"
 				PreprocessorDefinitions="WIN32;_DEBUG;_CONSOLE"
 				MinimalRebuild="true"
 				BasicRuntimeChecks="3"

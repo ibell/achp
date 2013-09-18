@@ -15,6 +15,8 @@ int main()
 	//}
 
 	BPHE = BrazedPlateHeatExchanger();
+	BPHE.State_h_inlet = CoolPropStateClassSI("Propane");
+	BPHE.State_h_inlet.update(1,-1,2,101325);
 	BPHE.test();
 	for (double mdot = 0.0001; mdot < 0.1; mdot += 0.0001)
 	{
