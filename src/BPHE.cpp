@@ -390,7 +390,7 @@ void BrazedPlateHeatExchanger::BuildEnthalpyLists(double Q)
 
 	// Now we need to find the complementary phase boundaries for each cell boundary
     int I=0;
-	while (EnthalpyList_c.size() != EnthalpyList_h.size())
+	while (I != EnthalpyList_h.size()-1)
 	{
         // Try to figure out whether the next phase transition is on the hot or cold side     
         double Qbound_h = this->mdot_h*(EnthalpyList_h[I+1]-EnthalpyList_h[I]);
@@ -417,6 +417,18 @@ void BrazedPlateHeatExchanger::BuildEnthalpyLists(double Q)
 			PhaseBoundary_h.insert(PhaseBoundary_h.begin()+I+1, false);
 		}
         I += 1;
+	}
+
+	// Double check the enthalpy bounds for each cell
+	// 
+	for (int i = 0; i < (int)EnthalpyList_c.size()-1; i++)
+	{
+		double Qh = this->mdot_h*(EnthalpyList_h[i+1]-EnthalpyList_h[i]);
+		double Qc = this->mdot_c*(EnthalpyList_c[i+1]-EnthalpyList_c[i]);
+		if (fabs(Qh/Qc-1) > 1e-10)
+		{
+			throw ValueError(format("Heat tranfer rates do not balance in cell [%d]",i).c_str());
+		}
 	}
 
 	// Now we need to find the phases for each cell
@@ -461,6 +473,7 @@ void BrazedPlateHeatExchanger::BuildEnthalpyLists(double Q)
 			throw ValueError(format("Enthalpy of the cold stream [%g J/kg] is not liquid, gas or two-phase", hmean_c));
 		}
 	}
+
 }
 
 //        
