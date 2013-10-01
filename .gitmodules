@@ -1,3 +1,6 @@
 [submodule "externals/coolprop"]
 	path = externals/coolprop
 	url = https://github.com/ibell/coolprop
+[submodule "externals/thermalcorr"]
+	path = externals/thermalcorr
+	url = https://github.com/ibell/thermalcorr

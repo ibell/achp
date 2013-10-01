@@ -16,6 +16,7 @@ int main()
 
 	BPHE = BrazedPlateHeatExchanger();
 
+	BPHE.test();
 	// Cold stream inlet
 	BPHE.State_c_inlet = CoolPropStateClassSI("Propane");
     BPHE.State_c_inlet.update(iT,290,iQ,0.3);
@@ -28,6 +29,8 @@ int main()
 
 	BPHE.mdot_h = BPHE.mdot_c*0.53940779782763737;
 	BPHE.calculate();
+
+	BPHE.verbosity = 10;
 	
 	//for (double mdot_ratio_h_c = 0.001; mdot_ratio_h_c < 1000; mdot_ratio_h_c *= 1.1)
 	//{

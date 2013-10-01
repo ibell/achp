@@ -2,7 +2,7 @@
 #ifndef COMPRESSOR_H
 #define COMPRESSOR_H
 
-#include "CoolProp/CPState.h"
+#include "coolprop/CoolProp/CPState.h"
 #include "ACHPcore.h"
 
 class CompressorClass// : public ACHPComponentClass

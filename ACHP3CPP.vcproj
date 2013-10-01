@@ -42,7 +42,7 @@
 				Name="VCCLCompilerTool"
 				AdditionalOptions=""
 				Optimization="0"
-				AdditionalIncludeDirectories="C:\Users\Belli\Documents\Code\achp_git\externals\coolprop"
+				AdditionalIncludeDirectories="C:\Users\Belli\Documents\Code\achp_git\externals"
 				PreprocessorDefinitions="WIN32;_DEBUG;_CONSOLE"
 				MinimalRebuild="true"
 				BasicRuntimeChecks="3"
@@ -400,6 +400,38 @@
 			</File>
 			<File
 				RelativePath=".\externals\coolprop\CoolProp\version.h"
+				>
+			</File>
+		</Filter>
+		<Filter
+			Name="ThermalCorr"
+			>
+			<File
+				RelativePath=".\externals\thermalcorr\src\BrazedPlateHeatExchanger.cpp"
+				>
+			</File>
+			<File
+				RelativePath=".\externals\thermalcorr\src\BrazedPlateHeatExchanger.h"
+				>
+			</File>
+			<File
+				RelativePath=".\externals\thermalcorr\src\InternalFlow.cpp"
+				>
+			</File>
+			<File
+				RelativePath=".\externals\thermalcorr\src\InternalFlow.h"
+				>
+			</File>
+			<File
+				RelativePath=".\externals\thermalcorr\src\Microchannel.cpp"
+				>
+			</File>
+			<File
+				RelativePath=".\externals\thermalcorr\src\Microchannel.h"
+				>
+			</File>
+			<File
+				RelativePath=".\externals\thermalcorr\src\thermalcorr.h"
 				>
 			</File>
 		</Filter>

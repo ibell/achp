@@ -48,10 +48,12 @@ for mdot_ratio_h_c in np.logspace(np.log10(0.1),np.log10(5),200):
     
     ax2.plot(hcnorm, Tc, 'bo-')
     ax2.plot(hhnorm, Th, 'ro-')
+    ax2.set_xlabel('Norm. length')
+    ax2.set_ylabel('Temperature[K]')
     ax2.set_xlim(0,1)
     
-    plt.suptitle(str(mdot_ratio_h_c))
+    plt.suptitle('$\dot m_h/\dot m_c = $ {m:0.3}'.format(m=mdot_ratio_h_c))
     
-    plt.tight_layout()    
-    plt.savefig('{s:08d}'.format(s=int(mdot_ratio_h_c*1000))+'.png')    
+    plt.tight_layout()
+    plt.savefig('{s:08d}'.format(s=int(mdot_ratio_h_c*1000))+'.pdf')    
     fig.clf()

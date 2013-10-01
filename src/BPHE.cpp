@@ -1,8 +1,7 @@
-
-#include "BPHE.h"
-#include "CoolProp/CPState.h"
-#include "CoolProp/Solvers.h"
 #include <algorithm>
+#include "BPHE.h"
+#include "coolprop/CoolProp/CPState.h"
+#include "coolprop/CoolProp/Solvers.h"
 
 //class PHEHXClass():
     
@@ -86,6 +85,28 @@ void BrazedPlateHeatExchanger::calculate()
 {
 	// Check that the inputs are ok
 	_check();
+	
+	// Check the parameters for the BPHE
+	if (!ValidNumber(this->geo.PlateAmplitude)){throw ValueError("PlateAmplitude is undefined for BPHE");}
+	if (!ValidNumber(this->geo.PlateWavelength)){throw ValueError("PlateWavelength is undefined for BPHE");}
+	if (!ValidNumber(this->geo.PlateThickness)){throw ValueError("PlateThickness is undefined for BPHE");}
+	if (!ValidNumber(this->geo.InclinationAngle)){throw ValueError("InclinationAngle is undefined for BPHE");}
+	if (!ValidNumber(this->geo.Bp)){throw ValueError("Bp is undefined for BPHE");}
+	if (!ValidNumber(this->geo.Lp)){throw ValueError("Lp is undefined for BPHE");}
+
+    if (this->more_channels == MORE_CHANNELS_HOT)
+	{
+        // Hot stream gets the extra channel
+        this->Ngaps_h = (this->Nplates-1)/2+1;
+        this->Ngaps_c = this->Nplates-1-this->Ngaps_h;
+	}
+	else if (this->more_channels == MORE_CHANNELS_COLD)
+	{
+        // Cold stream gets the extra channel
+        this->Ngaps_c = (this->Nplates-1)/2+1;
+        this->Ngaps_h = this->Nplates-1-this->Ngaps_c;
+	}
+
 	// Find the saturation states
 	this->SaturationStates();
 	// Determine the maximum heat transfer rate considering internal and external pinching
@@ -93,6 +114,35 @@ void BrazedPlateHeatExchanger::calculate()
 	// Now actually calculate the heat transfer rate since we know the heat transfer rate is 
 	// bound between 0 and Qmax
 	this->CalculateQ(Qmax);
+
+	// Hydraulic diameter
+	double X = 2*M_PI*this->geo.PlateAmplitude/this->geo.PlateWavelength;
+    double PHI = 1.0/6.0*(1+sqrt(1+X*X)+4*sqrt(1+X*X/2));
+    double dh = 4*this->geo.PlateAmplitude/PHI;
+	
+	// Area of one plate
+    double A0 = this->geo.Bp*this->geo.Lp; // The projected surface between the ports
+    double A_plate = PHI*A0; // The plane surface of one plate
+
+	// The flow area of one gap
+	double A_flow_gap = 2*this->geo.PlateAmplitude*this->geo.Bp;
+
+	// The volume of one channel
+    double Vchannel = this->geo.Bp*this->geo.Lp*2*this->geo.PlateAmplitude;
+
+	// There are (Nplates-2) active plates (outer ones don't do anything)
+	this->A_wetted_h = A_plate*(this->Nplates-2);
+	this->V_h = Vchannel*this->Ngaps_h;
+	this->A_flow_h = A_flow_gap*this->Ngaps_h;
+	this->Dh_h = dh;
+
+	this->A_wetted_c = A_plate*(this->Nplates-2);
+	this->V_c = Vchannel*this->Ngaps_c;
+	this->A_flow_c = A_flow_gap*this->Ngaps_c;
+	this->Dh_c = dh;
+
+	TCBPHE::BPHEData Inputs_hot, Inputs_cold;
+	TCBPHE::BPHE_1phase(this->geo,&Inputs_hot);
 };
 
 class HeatTransferObjectiveFunction : public FuncWrapper1D
@@ -435,7 +485,7 @@ void BrazedPlateHeatExchanger::BuildEnthalpyLists(double Q)
 	// Warning: indices of cells are offset by one from the indices of the cell boundaries
 	CellPhaseList_h = std::vector<int>(EnthalpyList_h.size()-1,-1);
 	CellPhaseList_c = std::vector<int>(EnthalpyList_c.size()-1,-1);
-	for (int i = 0; i < CellPhaseList_h.size(); i++)
+	for (int i = 0; i < (int)CellPhaseList_h.size(); i++)
 	{
 		// Mean enthalpy of each cell
 		double hmean_h = (EnthalpyList_h[i] + EnthalpyList_h[i+1])/2.0;
@@ -473,74 +523,51 @@ void BrazedPlateHeatExchanger::BuildEnthalpyLists(double Q)
 			throw ValueError(format("Enthalpy of the cold stream [%g J/kg] is not liquid, gas or two-phase", hmean_c));
 		}
 	}
-
 }
 
 //        
 //    def eNTU_CounterFlow(self,Cr,Ntu):
 //        return ((1 - exp(-Ntu * (1 - Cr))) / 
-//            (1 - Cr * exp(-Ntu * (1 - Cr))))
-//    
-//    def _OnePhaseH_OnePhaseC_Qimposed(self,Inputs):
-//        """
-//        Single phase on both sides
-//        Inputs is a dict of parameters
-//        """
-//        
-//        #Calculate the mean temperature
-//        Tmean_h=Inputs['Tmean_h']
-//        Tmean_c=Inputs['Tmean_c']
-//        #Evaluate heat transfer coefficient for both fluids
-//        h_h,cp_h,PlateOutput_h=self.PlateHTDP(self.Ref_h, Tmean_h, Inputs['pin_h'],self.mdot_h/self.NgapsHot)
-//        h_c,cp_c,PlateOutput_c=self.PlateHTDP(self.Ref_c, Tmean_c, Inputs['pin_c'],self.mdot_c/self.NgapsCold)
-//        
-//        #Use cp calculated from delta h/delta T
-//        cp_h=Inputs['cp_h']
-//        cp_c=Inputs['cp_c']
-//        #Evaluate UA [W/K] if entire HX was in this section 
-//        UA_total=1/(1/(h_h*self.A_h_wetted)+1/(h_c*self.A_c_wetted)+self.PlateThickness/(self.PlateConductivity*(self.A_c_wetted+self.A_h_wetted)/2.))
-//        #Get Ntu [-]
-//        C=[cp_c*self.mdot_c,cp_h*self.mdot_h]
-//        Cmin=min(C)
-//        Cr=Cmin/max(C)
-//        
-//        #Effectiveness [-]
-//        Q=Inputs['Q']
-//        Qmax=Cmin*(Inputs['Tin_h']-Inputs['Tin_c'])
-//        epsilon = Q/Qmax
-//        
-//        if 1 <= epsilon < 1+1e-6:  #if epsilon is slightly larger than 1
-//            epsilon = 1-1e-12
-//        
-//        #Pure counterflow with Cr<1 (Incropera Table 11.4)
-//        NTU=1/(Cr-1)*log((epsilon-1)/(epsilon*Cr-1))
-//        
-//        #Required UA value
-//        UA_req=Cmin*NTU
-//        
-//        #w is required part of heat exchanger for this duty
-//        w=UA_req/UA_total
-//        
-//        #Determine both charge components
-//        rho_h=Props('D','T',Tmean_h, 'P', self.pin_h, self.Ref_h)
-//        Charge_h = w * self.V_h * rho_h
-//        rho_c=Props('D','T',Tmean_c, 'P', self.pin_c, self.Ref_c)
-//        Charge_c = w * self.V_c * rho_c
-//        
-//        #Pack outputs
-//        Outputs={
-//            'w': w,
-//            'Tout_h': Inputs['Tin_h']-Q/(self.mdot_h*cp_h),
-//            'Tout_c': Inputs['Tin_c']+Q/(self.mdot_c*cp_c),
-//            'Charge_c': Charge_c,
-//            'Charge_h': Charge_h,
-//            'DP_h': -PlateOutput_h['DELTAP'],
-//            'DP_c': -PlateOutput_c['DELTAP'],
-//            'h_h':h_h,
-//            'h_c':h_c,
-//            
-//        }
-//        return dict(Inputs.items()+Outputs.items())
+//            (1 - Cr * exp(-Ntu * (1 - Cr))))   
+
+/*
+Single phase on both sides
+Inputs is a dict of parameters
+*/
+
+//void BrazedPlateHeatExchanger::_OnePhaseH(BPHECell c)
+//{
+//	rho_h = Props('D','T',Tmean_h, 'P', self.pin_h, self.Ref_h)
+//	cell.Charge_h = w * this->Volume_h * rho_h;	
+//}
+
+void BrazedPlateHeatExchanger::_OnePhaseH_OnePhaseC_Qimposed(BPHECell cell)
+{
+	// Define inputs to the heat transfer function
+	//thermalcorr::BPHEData Inputs_hot, Inputs_cold;
+
+	//// Call the function for the heat transfer and pressure drop for the hot stream
+	//tc::BrazedPlateHeatExchanger::BPHE_1phase(this->geo,&Inputs_hot);
+	//// Call the function for the heat transfer and pressure drop for the cold stream
+	//tc::BrazedPlateHeatExchanger::BPHE_1phase(this->geo,&Inputs_cold);
+    
+    // Evaluate UA [W/K] as if entire HX was in this section
+	double R_h = 1/(cell.HTC_h*this->A_wetted_h);
+	double R_c = 1/(cell.HTC_c*this->A_wetted_c);
+    cell.UA_available = 1/(R_h + R_c + this->R_plate);
+    
+    // w is required length of heat exchanger for this duty
+    cell.w = cell.UA_required/cell.UA_available;
+    
+    //// Determine both charge components
+    //rho_c=Props('D','T',Tmean_c, 'P', self.pin_c, self.Ref_c)
+    //cell.Charge_c = w * this->Volume_c * rho_c;
+    
+	cell.charge_c = _HUGE;
+	cell.charge_h = _HUGE;
+	cell.DP_h = _HUGE;
+	cell.DP_c = _HUGE;
+}
 //    
 //    def _OnePhaseH_OnePhaseC_wimposed(self,Inputs):
 //        """
@@ -1240,6 +1267,18 @@ void BrazedPlateHeatExchanger::test()
 	this->State_c_inlet.update(iT,280,iQ,0.0);
 	this->State_c_inlet.update(iT,260,iP,this->State_c_inlet.p());
 	this->mdot_c = 3.0;
+
+	this->Nplates = 46;
+	this->plate_conductivity = 15.0; //[W/m-K]
+	this->more_channels = this->MORE_CHANNELS_HOT;
+
+	this->geo.Bp = 0.101;
+	this->geo.Lp = 0.455; // Center-to-center distance between ports
+    this->geo.PlateAmplitude = 0.00102; //[m]
+    this->geo.PlateThickness = 0.0003; //[m]
+    this->geo.PlateWavelength =  0.00626; //[m]
+    this->geo.InclinationAngle=  65.0/180.0*M_PI; //[rad]
+    
 }
 
 
