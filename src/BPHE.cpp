@@ -67,25 +67,22 @@ void BrazedPlateHeatExchanger::_check()
 		if (this->verbosity > 0){ std::cout << err.c_str() << std::endl; }
 		throw ValueError(err.c_str());
 	}
-	if (this->State_h_inlet.p() > this->State_h_inlet.keyed_output(iPcrit))
+	if (  (this->State_h_inlet.fluid_type==FLUID_TYPE_PURE || this->State_h_inlet.fluid_type == FLUID_TYPE_PURE) 
+		   && (this->State_h_inlet.p() > this->State_h_inlet.keyed_output(iPcrit))
+		)
 	{
 		std::string err = format("Hot stream pressure is supercritical (not currently permitted) ",this->State_c_inlet.T(), this->State_h_inlet.T()); 
 		if (this->verbosity > 0) { std::cout << err.c_str() << std::endl; }
 		throw ValueError(err.c_str());
 	}
-	if (this->State_c_inlet.p() > this->State_c_inlet.keyed_output(iPcrit))
+	if ( (this->State_c_inlet.fluid_type==FLUID_TYPE_PURE || this->State_c_inlet.fluid_type == FLUID_TYPE_PURE)  
+		  && (this->State_c_inlet.p() > this->State_c_inlet.keyed_output(iPcrit))
+	   )
 	{
 		std::string err = format("Cold stream pressure is supercritical (not currently permitted) ",this->State_c_inlet.T(), this->State_h_inlet.T()); 
 		if (this->verbosity > 0) { std::cout << err.c_str() << std::endl; }
 		throw ValueError(err.c_str());
 	}
-}
-
-void BrazedPlateHeatExchanger::calculate()
-{
-	// Check that the inputs are ok
-	_check();
-	
 	// Check the parameters for the BPHE
 	if (!ValidNumber(this->geo.PlateAmplitude)){throw ValueError("PlateAmplitude is undefined for BPHE");}
 	if (!ValidNumber(this->geo.PlateWavelength)){throw ValueError("PlateWavelength is undefined for BPHE");}
@@ -93,6 +90,15 @@ void BrazedPlateHeatExchanger::calculate()
 	if (!ValidNumber(this->geo.InclinationAngle)){throw ValueError("InclinationAngle is undefined for BPHE");}
 	if (!ValidNumber(this->geo.Bp)){throw ValueError("Bp is undefined for BPHE");}
 	if (!ValidNumber(this->geo.Lp)){throw ValueError("Lp is undefined for BPHE");}
+	if (this->Nplates <= 0  || this->Nplates > 1000 ){throw ValueError("Nplates is invalid for BPHE");}
+	if (!ValidNumber(this->plate_conductivity)){throw ValueError("plate_conductivity is undefined for BPHE");}
+	if (this->more_channels != MORE_CHANNELS_COLD && this->more_channels != MORE_CHANNELS_HOT){throw ValueError("more_channels is not one of MORE_CHANNELS_HOT or MORE_CHANNELS_COLD");}
+}
+
+void BrazedPlateHeatExchanger::calculate()
+{
+	// Check that the inputs are ok
+	_check();
 
     if (this->more_channels == MORE_CHANNELS_HOT)
 	{
@@ -110,10 +116,7 @@ void BrazedPlateHeatExchanger::calculate()
 	// Find the saturation states
 	this->SaturationStates();
 	// Determine the maximum heat transfer rate considering internal and external pinching
-	double Qmax = this->DetermineQmax();
-	// Now actually calculate the heat transfer rate since we know the heat transfer rate is 
-	// bound between 0 and Qmax
-	this->CalculateQ(Qmax);
+	Qmax = this->DetermineQmax();
 
 	// Hydraulic diameter
 	double X = 2*M_PI*this->geo.PlateAmplitude/this->geo.PlateWavelength;
@@ -141,8 +144,13 @@ void BrazedPlateHeatExchanger::calculate()
 	this->A_flow_c = A_flow_gap*this->Ngaps_c;
 	this->Dh_c = dh;
 
-	TCBPHE::BPHEData Inputs_hot, Inputs_cold;
-	TCBPHE::BPHE_1phase(this->geo,&Inputs_hot);
+	this->R_plate = this->geo.PlateThickness/(this->plate_conductivity*A_wetted_h);
+
+	// Now actually calculate the heat transfer rate since we know the heat transfer rate is 
+	// bound between 0 and Qmax
+	this->CalculateQ(Qmax);
+
+
 };
 
 class HeatTransferObjectiveFunction : public FuncWrapper1D
@@ -153,9 +161,63 @@ public:
 	HeatTransferObjectiveFunction(BrazedPlateHeatExchanger *BPHE){this->BPHE = BPHE;};
 	double call(double Q)
 	{
-		std::vector<BPHECell> CellList;
+		BPHE->CellList.clear();
 		
-		return 0;
+		double w_summer = 0;
+
+		// Build the enthalpy lists
+		BPHE->BuildEnthalpyLists(Q);
+
+		BPHE->DELTAP_c = 0;
+		BPHE->DELTAP_h = 0;
+		for (int i = 0; i < (int)BPHE->CellPhaseList_c.size(); i++)
+		{
+			
+
+			int phase_h = BPHE->CellPhaseList_h[i];
+			int phase_c = BPHE->CellPhaseList_c[i];
+
+			BPHECell cell;
+			cell.T_i_c = BPHE->TemperatureList_c[i];
+			cell.T_o_h = BPHE->TemperatureList_h[i];
+			cell.T_o_c = BPHE->TemperatureList_c[i+1];
+			cell.T_i_h = BPHE->TemperatureList_h[i+1];
+			// Calculate the LMTD for the cell
+			double DELTATA = cell.T_i_h - cell.T_o_c;
+			double DELTATB = cell.T_o_h - cell.T_i_c;
+			// We take the abs to avoid problems when temperature are pseudo-equal, but one is just barely negative
+			cell.LMTD = (DELTATA-DELTATB)/log(abs(DELTATA/DELTATB));
+
+			// The actual heat transfer rate in the cell
+			cell.Qdot = BPHE->mdot_c*(BPHE->EnthalpyList_c[i+1]-BPHE->EnthalpyList_c[i]); // [W] positive
+
+			// The required UA value for the cell
+			cell.UA_required = cell.Qdot/cell.LMTD;
+
+			//  The State instances
+			cell.CPS_h = &(BPHE->CellStateList_h[i]);
+			cell.CPS_c = &(BPHE->CellStateList_c[i]);
+
+			// Both hot and cold are single-phase
+			if ((phase_h == iGas || phase_h == iLiquid) && (phase_c == iGas || phase_c == iLiquid))
+			{
+				BPHE->_OnePhaseH_OnePhaseC_Qimposed(&cell);
+			}
+			else if ((phase_h == iGas || phase_h == iLiquid) && (phase_c == iTwoPhase))
+			{
+				BPHE->_OnePhaseH_TwoPhaseC_Qimposed(&cell);
+			}
+			else
+			{
+				throw ValueError(format("invalid phases hot=%d, cold=%d",phase_h,phase_c));
+			}
+			w_summer += cell.w;
+			BPHE->DELTAP_c += cell.DP_c;
+			BPHE->DELTAP_h += cell.DP_h;
+			BPHE->CellList.push_back(cell);
+		}
+		
+		return w_summer-1;
 	};
 };
 
@@ -163,27 +225,49 @@ void BrazedPlateHeatExchanger::CalculateQ(double Qmax)
 {
 	HeatTransferObjectiveFunction HTOF(this);
 	std::string errstr;
-	Brent(&HTOF,0,Qmax,1e-16,1e-8,30,&errstr);
+	this->Qdot = Brent(&HTOF,0.000001,Qmax,1e-16,1e-4,30,&errstr);
 }
 
 void BrazedPlateHeatExchanger::SaturationStates()
 {
+	if (State_h_inlet.fluid_type == FLUID_TYPE_PSEUDOPURE || State_h_inlet.fluid_type == FLUID_TYPE_PURE)
+	{
 	State_h_sat = CoolPropStateClassSI(this->State_h_inlet.pFluid);
-	State_c_sat = CoolPropStateClassSI(this->State_c_inlet.pFluid);
-
 	State_h_sat.update(iP, State_h_inlet.p(), iQ, 0);
+	}
+
+	if (State_c_inlet.fluid_type == FLUID_TYPE_PSEUDOPURE || State_c_inlet.fluid_type == FLUID_TYPE_PURE)
+	{
+	State_c_sat = CoolPropStateClassSI(this->State_c_inlet.pFluid);
 	State_c_sat.update(iP, State_c_inlet.p(), iQ, 0);
+	}
 }
 double BrazedPlateHeatExchanger::DetermineQmax()
 {
+	CoolPropStateClassSI State_h_max, State_c_max;
 	// Check inputs are ok
 	_check();
 	double Qmax;
     // See if each phase could change phase if it were to reach the
     // inlet temperature of the opposite phase 
 
-	CoolPropStateClassSI State_h_max(this->State_h_inlet.pFluid);
-	CoolPropStateClassSI State_c_max(this->State_c_inlet.pFluid);
+	if (this->State_h_inlet.fluid_type==FLUID_TYPE_PURE || this->State_h_inlet.fluid_type == FLUID_TYPE_PSEUDOPURE)
+	{
+		 State_h_max = CoolPropStateClassSI(this->State_h_inlet.pFluid);
+	}
+	else
+	{
+		 State_h_max = CoolPropStateClassSI(this->State_h_inlet.get_name());
+	}
+
+	if (this->State_c_inlet.fluid_type==FLUID_TYPE_PURE || this->State_c_inlet.fluid_type == FLUID_TYPE_PSEUDOPURE)
+	{
+		 State_c_max = CoolPropStateClassSI(this->State_c_inlet.pFluid);
+	}
+	else
+	{
+		 State_c_max = CoolPropStateClassSI(this->State_c_inlet.get_name());
+	}
     
 	// *****************  EXTERNAL PINCHING ************************
     // Find the maximum possible rate of heat transfer as the minimum of 
@@ -368,10 +452,14 @@ double BrazedPlateHeatExchanger::DetermineQmax()
 //    
 void BrazedPlateHeatExchanger::BuildEnthalpyLists(double Q)
 {
-	CoolPropStateClassSI State_h_outlet(this->State_h_inlet.pFluid);
-	CoolPropStateClassSI State_c_outlet(this->State_c_inlet.pFluid);
-	CoolPropStateClassSI State_h(this->State_h_inlet.pFluid);
-	CoolPropStateClassSI State_c(this->State_c_inlet.pFluid);
+	double hsatV_h, hsatL_h, TsatV_h, TsatL_h, rhosatV_h, rhosatL_h;
+	double hsatV_c, hsatL_c, TsatV_c, TsatL_c, rhosatV_c, rhosatL_c;
+	CoolPropStateClassSI State_h_outlet, State_h, State_c, State_c_outlet;
+
+	State_h_outlet = this->State_h_inlet.copy();
+	State_h = this->State_h_inlet.copy();
+	State_c_outlet = this->State_c_inlet.copy();
+	State_c = this->State_c_inlet.copy();
 
     // Start the enthalpy lists with inlet and outlet enthalpies
     // Ordered from lowest to highest enthalpies for both streams
@@ -389,6 +477,7 @@ void BrazedPlateHeatExchanger::BuildEnthalpyLists(double Q)
 	this->PhaseBoundary_h = std::vector<bool>(2,false);
 
 	// Calculate the states at the outlet of the heat exchanger
+	// If the outlet 
 	State_h_outlet.update(iP,this->State_h_inlet.p(),iH,this->EnthalpyList_h[0]);
 	State_c_outlet.update(iP,this->State_c_inlet.p(),iH,this->EnthalpyList_c[1]);
 
@@ -400,42 +489,66 @@ void BrazedPlateHeatExchanger::BuildEnthalpyLists(double Q)
 	this->TemperatureList_h[0] = State_h_outlet.T();
 	this->TemperatureList_h[1] = this->State_h_inlet.T();
 
+	// Build the density lists using the bounds
+	this->DensityList_c.resize(2);
+	this->DensityList_c[0] = this->State_c_inlet.rho();
+	this->DensityList_c[1] = State_c_outlet.rho();
+	this->DensityList_h.resize(2);
+	this->DensityList_h[0] = State_h_outlet.rho();
+	this->DensityList_h[1] = this->State_h_inlet.rho();
+
 	// Check whether the enthalpy boundaries are within the bounds set by 
     // the imposed amount of heat transfer
 	//
-	// If they are, insert them into the enthalpy list
-	double hsatV_c = this->State_c_sat.hV();
-	double hsatL_c = this->State_c_sat.hL();
-	double TsatV_c = this->State_c_sat.TV();
-	double TsatL_c = this->State_c_sat.TL();
-    if (hsatV_c < EnthalpyList_c[1] && hsatV_c > EnthalpyList_c[0])
+	if (this->State_c_inlet.fluid_type != FLUID_TYPE_INCOMPRESSIBLE_LIQUID 
+		&& 
+		this->State_c_inlet.fluid_type != FLUID_TYPE_INCOMPRESSIBLE_SOLUTION)
 	{
-        EnthalpyList_c.insert(EnthalpyList_c.begin()+1, hsatV_c);
-		TemperatureList_c.insert(TemperatureList_c.begin()+1, TsatV_c);
-		PhaseBoundary_c.insert(PhaseBoundary_c.begin()+1, true);
-	}
-    if (hsatL_c < EnthalpyList_c[1] && hsatL_c > EnthalpyList_c[0])
-	{
-        EnthalpyList_c.insert(EnthalpyList_c.begin()+1, hsatL_c);
-		TemperatureList_c.insert(TemperatureList_c.begin()+1, TsatL_c);
-		PhaseBoundary_c.insert(PhaseBoundary_c.begin()+1, true);
+		// If they are, insert them into the enthalpy list
+		hsatV_c = this->State_c_sat.hV();
+		hsatL_c = this->State_c_sat.hL();
+		TsatV_c = this->State_c_sat.TV();
+		TsatL_c = this->State_c_sat.TL();
+		rhosatV_c = this->State_c_sat.rhoV();
+		rhosatL_c = this->State_c_sat.rhoL();
+		if (hsatV_c < EnthalpyList_c[1] && hsatV_c > EnthalpyList_c[0])
+		{
+			EnthalpyList_c.insert(EnthalpyList_c.begin()+1, hsatV_c);
+			TemperatureList_c.insert(TemperatureList_c.begin()+1, TsatV_c);
+			DensityList_c.insert(DensityList_c.begin()+1, rhosatV_c);
+			PhaseBoundary_c.insert(PhaseBoundary_c.begin()+1, true);
+		}
+		if (hsatL_c < EnthalpyList_c[1] && hsatL_c > EnthalpyList_c[0])
+		{
+			EnthalpyList_c.insert(EnthalpyList_c.begin()+1, hsatL_c);
+			TemperatureList_c.insert(TemperatureList_c.begin()+1, TsatL_c);
+			DensityList_c.insert(DensityList_c.begin()+1, rhosatL_c);
+			PhaseBoundary_c.insert(PhaseBoundary_c.begin()+1, true);
+		}
 	}
         
-	double hsatV_h = this->State_h_sat.hV();
-	double hsatL_h = this->State_h_sat.hL();
-	double TsatV_h = this->State_h_sat.TV();
-	double TsatL_h = this->State_h_sat.TL();
-    if (hsatV_h < EnthalpyList_h[1] && hsatV_h > EnthalpyList_h[0])
+	if (this->State_h_inlet.fluid_type != FLUID_TYPE_INCOMPRESSIBLE_LIQUID && this->State_h_inlet.fluid_type != FLUID_TYPE_INCOMPRESSIBLE_SOLUTION)
 	{
-		EnthalpyList_h.insert(EnthalpyList_h.begin()+1, hsatV_h);
-		TemperatureList_h.insert(TemperatureList_h.begin()+1, TsatL_h);
-		PhaseBoundary_h.insert(PhaseBoundary_h.begin()+1, true);
-	}
-    if (hsatL_h < EnthalpyList_h[1] && hsatL_h > EnthalpyList_h[0])
-	{
-        EnthalpyList_h.insert(EnthalpyList_h.begin()+1, hsatL_h);
-		TemperatureList_h.insert(TemperatureList_h.begin()+1, TsatL_h);
-		PhaseBoundary_h.insert(PhaseBoundary_h.begin()+1, true);
+		hsatV_h = this->State_h_sat.hV();
+		hsatL_h = this->State_h_sat.hL();
+		TsatV_h = this->State_h_sat.TV();
+		TsatL_h = this->State_h_sat.TL();
+		rhosatV_h = this->State_h_sat.rhoV();
+		rhosatL_h = this->State_h_sat.rhoL();
+		if (hsatV_h < EnthalpyList_h[1] && hsatV_h > EnthalpyList_h[0])
+		{
+			EnthalpyList_h.insert(EnthalpyList_h.begin()+1, hsatV_h);
+			TemperatureList_h.insert(TemperatureList_h.begin()+1, TsatV_h);
+			DensityList_h.insert(DensityList_h.begin()+1, rhosatV_h);
+			PhaseBoundary_h.insert(PhaseBoundary_h.begin()+1, true);
+		}
+		if (hsatL_h < EnthalpyList_h[1] && hsatL_h > EnthalpyList_h[0])
+		{
+			EnthalpyList_h.insert(EnthalpyList_h.begin()+1, hsatL_h);
+			TemperatureList_h.insert(TemperatureList_h.begin()+1, TsatL_h);
+			DensityList_h.insert(DensityList_h.begin()+1, rhosatL_h);
+			PhaseBoundary_h.insert(PhaseBoundary_h.begin()+1, true);
+		}
 	}
 
 	// Now we need to find the complementary phase boundaries for each cell boundary
@@ -452,6 +565,7 @@ void BrazedPlateHeatExchanger::BuildEnthalpyLists(double Q)
 			double h = EnthalpyList_c[I]+Qbound_h/this->mdot_c;
 			State_c.update(iP,this->State_c_inlet.p(),iH,h);
 			TemperatureList_c.insert(TemperatureList_c.begin()+I+1, State_c.T());
+			DensityList_c.insert(DensityList_c.begin()+I+1, State_c.rho());
             EnthalpyList_c.insert(EnthalpyList_c.begin()+I+1, h);
 			PhaseBoundary_c.insert(PhaseBoundary_c.begin()+I+1, false);
 		}
@@ -463,6 +577,7 @@ void BrazedPlateHeatExchanger::BuildEnthalpyLists(double Q)
 			// Update the state using this P,H value
 			State_h.update(iP,this->State_h_inlet.p(),iH,h);
 			TemperatureList_h.insert(TemperatureList_h.begin()+I+1, State_h.T());
+			DensityList_h.insert(DensityList_h.begin()+I+1, State_h.rho());
             EnthalpyList_h.insert(EnthalpyList_h.begin()+I+1, h);
 			PhaseBoundary_h.insert(PhaseBoundary_h.begin()+I+1, false);
 		}
@@ -475,9 +590,9 @@ void BrazedPlateHeatExchanger::BuildEnthalpyLists(double Q)
 	{
 		double Qh = this->mdot_h*(EnthalpyList_h[i+1]-EnthalpyList_h[i]);
 		double Qc = this->mdot_c*(EnthalpyList_c[i+1]-EnthalpyList_c[i]);
-		if (fabs(Qh/Qc-1) > 1e-10)
+		if (fabs(Qh/Qc-1) > 1e-3)
 		{
-			throw ValueError(format("Heat tranfer rates do not balance in cell [%d]",i).c_str());
+			throw ValueError(format("Heat transfer rates do not balance in cell [%d]",i).c_str());
 		}
 	}
 
@@ -485,42 +600,85 @@ void BrazedPlateHeatExchanger::BuildEnthalpyLists(double Q)
 	// Warning: indices of cells are offset by one from the indices of the cell boundaries
 	CellPhaseList_h = std::vector<int>(EnthalpyList_h.size()-1,-1);
 	CellPhaseList_c = std::vector<int>(EnthalpyList_c.size()-1,-1);
+	CellStateList_h = std::vector<CoolPropStateClassSI>(EnthalpyList_h.size()-1);
+	CellStateList_c = std::vector<CoolPropStateClassSI>(EnthalpyList_c.size()-1);
+
 	for (int i = 0; i < (int)CellPhaseList_h.size(); i++)
 	{
 		// Mean enthalpy of each cell
 		double hmean_h = (EnthalpyList_h[i] + EnthalpyList_h[i+1])/2.0;
+		double hmean_c = (EnthalpyList_c[i] + EnthalpyList_c[i+1])/2.0;
 		
-		// Check what the phase is based on the mean enthalpy
-		if (hmean_h < hsatL_h){ 
+		if (this->State_h_inlet.fluid_type == FLUID_TYPE_INCOMPRESSIBLE_LIQUID || this->State_h_inlet.fluid_type == FLUID_TYPE_INCOMPRESSIBLE_SOLUTION)
+		{
 			CellPhaseList_h[i] = iLiquid;
 		}
-		else if (hmean_h > hsatV_h){
-			CellPhaseList_h[i] = iGas;
-		}
-		else if (hmean_h > hsatL_h && hmean_h < hsatV_h)
-		{
-			CellPhaseList_h[i] = iTwoPhase;
-		}
 		else
 		{
-			throw ValueError(format("Enthalpy of the hot stream [%g J/kg] is not liquid, gas or two-phase", hmean_h));
+			// Check what the phase is based on the mean enthalpy
+			if (hmean_h < hsatL_h){ 
+				CellPhaseList_h[i] = iLiquid;
+			}
+			else if (hmean_h > hsatV_h){
+				CellPhaseList_h[i] = iGas;
+			}
+			else if (hmean_h > hsatL_h && hmean_h < hsatV_h)
+			{
+				CellPhaseList_h[i] = iTwoPhase;
+			}
+			else
+			{
+				throw ValueError(format("Enthalpy of the hot stream [%g J/kg] is not liquid, gas or two-phase", hmean_h));
+			}
 		}
-
-		double hmean_c = (EnthalpyList_c[i] + EnthalpyList_c[i+1])/2.0;
-		// Check what the phase is based on the mean enthalpy
-		if (hmean_c < hsatL_c){ 
+		
+		if (this->State_c_inlet.fluid_type == FLUID_TYPE_INCOMPRESSIBLE_LIQUID || this->State_c_inlet.fluid_type == FLUID_TYPE_INCOMPRESSIBLE_SOLUTION)
+		{
 			CellPhaseList_c[i] = iLiquid;
 		}
-		else if (hmean_c > hsatV_c){
-			CellPhaseList_c[i] = iGas;
-		}
-		else if (hmean_c > hsatL_c && hmean_c < hsatV_c)
+		else
 		{
-			CellPhaseList_c[i] = iTwoPhase;
+			// Check what the phase is based on the mean enthalpy
+			if (hmean_c < hsatL_c){ 
+				CellPhaseList_c[i] = iLiquid;
+			}
+			else if (hmean_c > hsatV_c){
+				CellPhaseList_c[i] = iGas;
+			}
+			else if (hmean_c > hsatL_c && hmean_c < hsatV_c)
+			{
+				CellPhaseList_c[i] = iTwoPhase;
+			}
+			else
+			{
+				throw ValueError(format("Enthalpy of the cold stream [%g J/kg] is not liquid, gas or two-phase", hmean_c));
+			}
+		}
+
+		CellStateList_h[i] = this->State_h_inlet.copy();
+		if (CellPhaseList_h[i] == iLiquid || CellPhaseList_h[i] == iGas)
+		{
+			double Tmean_h = (TemperatureList_h[i] + TemperatureList_h[i+1])/2.0;
+			double rhomean_h = (DensityList_h[i] + DensityList_h[i+1])/2.0;
+			// Use educated guess values (mean) for the temperature and density in the cell midpoint
+			CellStateList_h[i].update(iH,hmean_h,iP,this->State_h_inlet.p(),Tmean_h,rhomean_h);
 		}
 		else
 		{
-			throw ValueError(format("Enthalpy of the cold stream [%g J/kg] is not liquid, gas or two-phase", hmean_c));
+			CellStateList_h[i].update(iH,hmean_h,iP,this->State_h_inlet.p());
+		}
+
+		CellStateList_c[i] = this->State_c_inlet.copy();
+		if (CellPhaseList_c[i] == iLiquid || CellPhaseList_c[i] == iGas)
+		{
+			// Use educated guess values (mean) for the temperature and density in the cell midpoint
+			double Tmean_c = (TemperatureList_c[i] + TemperatureList_c[i+1])/2.0;
+			double rhomean_c = (DensityList_c[i] + DensityList_c[i+1])/2.0;
+			CellStateList_c[i].update(iT,Tmean_c,iP,this->State_c_inlet.p(),Tmean_c, rhomean_c);
+		}
+		else
+		{
+			CellStateList_c[i].update(iH,hmean_c,iP,this->State_c_inlet.p());
 		}
 	}
 }
@@ -541,155 +699,135 @@ Inputs is a dict of parameters
 //	cell.Charge_h = w * this->Volume_h * rho_h;	
 //}
 
-void BrazedPlateHeatExchanger::_OnePhaseH_OnePhaseC_Qimposed(BPHECell cell)
+void BrazedPlateHeatExchanger::_OnePhaseH_OnePhaseC_Qimposed(BPHECell *cell)
 {
 	// Define inputs to the heat transfer function
-	//thermalcorr::BPHEData Inputs_hot, Inputs_cold;
+	TCBPHE::BPHEData Inputs_hot, Inputs_cold;
+
+	Inputs_hot.CPS = cell->CPS_h;
+	Inputs_cold.CPS = cell->CPS_c;
+	Inputs_hot.mdot_per_channel = this->mdot_h/this->Ngaps_h;
+	Inputs_cold.mdot_per_channel = this->mdot_c/this->Ngaps_c;
 
 	//// Call the function for the heat transfer and pressure drop for the hot stream
-	//tc::BrazedPlateHeatExchanger::BPHE_1phase(this->geo,&Inputs_hot);
+	TCBPHE::BPHE_1phase(this->geo,&Inputs_hot);
 	//// Call the function for the heat transfer and pressure drop for the cold stream
-	//tc::BrazedPlateHeatExchanger::BPHE_1phase(this->geo,&Inputs_cold);
+	TCBPHE::BPHE_1phase(this->geo,&Inputs_cold);
+
+	/// Reset the parameters in the cell class
+	cell->HTC_c = Inputs_cold.HTC;
+	cell->HTC_h = Inputs_hot.HTC;
     
     // Evaluate UA [W/K] as if entire HX was in this section
-	double R_h = 1/(cell.HTC_h*this->A_wetted_h);
-	double R_c = 1/(cell.HTC_c*this->A_wetted_c);
-    cell.UA_available = 1/(R_h + R_c + this->R_plate);
+	double R_h = 1/(cell->HTC_h*this->A_wetted_h);
+	double R_c = 1/(cell->HTC_c*this->A_wetted_c);
+    cell->UA_available = 1/(R_h + R_c + this->R_plate);
     
     // w is required length of heat exchanger for this duty
-    cell.w = cell.UA_required/cell.UA_available;
+    cell->w = cell->UA_required/cell->UA_available;
     
     //// Determine both charge components
     //rho_c=Props('D','T',Tmean_c, 'P', self.pin_c, self.Ref_c)
     //cell.Charge_c = w * this->Volume_c * rho_c;
     
-	cell.charge_c = _HUGE;
-	cell.charge_h = _HUGE;
-	cell.DP_h = _HUGE;
-	cell.DP_c = _HUGE;
+	// Set the other parameters
+	cell->charge_c = _HUGE;
+	cell->charge_h = _HUGE;
+	cell->DP_h = Inputs_hot.DELTAP;
+	cell->DP_c = Inputs_cold.DELTAP;
 }
-//    
-//    def _OnePhaseH_OnePhaseC_wimposed(self,Inputs):
-//        """
-//        Single phase on both sides
-//        Inputs is a dict of parameters that is the return value of _OnePhaseH_OnePhaseC_Qimposed
-//        """
-//        w = Inputs['w']
-//        #Calculate the mean temperature
-//        Tmean_h=Inputs['Tmean_h']  #We don't need to iterate to find the mean temperature because we already know there is more than enough length for this section's effectiveness to be 1.
-//        Tmean_c=Inputs['Tmean_c']
-//        #Evaluate heat transfer coefficient for both fluids
-//        h_h,cp_h,PlateOutput_h=self.PlateHTDP(self.Ref_h, Tmean_h, Inputs['pin_h'],self.mdot_h/self.NgapsHot)
-//        h_c,cp_c,PlateOutput_c=self.PlateHTDP(self.Ref_c, Tmean_c, Inputs['pin_c'],self.mdot_c/self.NgapsCold)
-//        
-//        #Use cp calculated from delta h/delta T
-//        cp_h=Inputs['cp_h']
-//        cp_c=Inputs['cp_c']
-//        #Evaluate UA [W/K] if entire HX was in this section 
-//        UA_total=1/(1/(h_h*self.A_h_wetted)+1/(h_c*self.A_c_wetted)+self.PlateThickness/(self.PlateConductivity*(self.A_c_wetted+self.A_h_wetted)/2.))
-//        UA_actual = UA_total*w  #We impose length fraction here so we already know the actual UA value
-//        #Get Ntu [-] and Effectiveness [-]
-//        C=[cp_c*self.mdot_c,cp_h*self.mdot_h]
-//        Cmin=min(C)
-//        Cr=Cmin/max(C)
-//        
-//        NTU = UA_actual/Cmin
-//        
-//        epsilon = (1 - exp(-NTU*(1 - Cr)))/(1 - Cr*exp(-NTU*(1 - Cr)))  #Pure counterflow with Cr<1 (Incropera Table 11.3)
-//        assert(epsilon <= 1)
-//        
-//        Qmax=Cmin*(Inputs['Tin_h']-Inputs['Tin_c'])
-//        Q = Qmax*epsilon
-//               
-//        #Determine both charge components
-//        rho_h=Props('D','T',Tmean_h, 'P', self.pin_h, self.Ref_h)
-//        Charge_h = w * self.V_h * rho_h
-//        rho_c=Props('D','T',Tmean_c, 'P', self.pin_c, self.Ref_c)
-//        Charge_c = w * self.V_c * rho_c
-//        
-//        #Pack outputs
-//        Outputs={
-//            'Tout_h': Inputs['Tin_h']-Q/(self.mdot_h*cp_h),
-//            'Tout_c': Inputs['Tin_c']+Q/(self.mdot_c*cp_c),
-//            'Charge_c': Charge_c,
-//            'Charge_h': Charge_h,
-//            'DP_h': -PlateOutput_h['DELTAP'],
-//            'DP_c': -PlateOutput_c['DELTAP'],
-//            'h_h':h_h,
-//            'h_c':h_c,
-//            'Q_wimposed':Q
-//        }
-//        return dict(Inputs.items()+Outputs.items())  #Overwrites any outputs that were passed back in as inputs with the new outputs
-//
-//    def _OnePhaseH_TwoPhaseC_Qimposed(self,Inputs):
-//        """
-//        The hot stream is all single phase, and the cold stream is evaporating
-//        """
-//        #Calculate the mean temperature for the single-phase fluid
-//        h_h,cp_h,PlateOutput_h=self.PlateHTDP(self.Ref_h, Inputs['Tmean_h'], Inputs['pin_h'],self.mdot_h/self.NgapsHot)
-//        #Use cp calculated from delta h/delta T
-//        cp_h=Inputs['cp_h']
-//        #Mole mass of refrigerant for Cooper correlation
-//        M=Props('M','T',0,'P',0,self.Ref_c)
-//        #Reduced pressure for Cooper Correlation
-//        pstar=Inputs['pin_c']/Props('E','T',0,'P',0,self.Ref_c)
-//        change=999
-//        w=1
-//        Q=Inputs['Q']
-//        """
-//        The Cooper Pool boiling relationship is a function of the heat flux, 
-//        therefore the heat flux must be iteratively determined
-//        """
-//        while abs(change)>1e-6:
-//            q_flux=Q/(w*self.A_c_wetted)
-//            
-//            #Heat transfer coefficient from Cooper Pool Boiling
-//            h_c_2phase=Cooper_PoolBoiling(pstar,1.0,q_flux,M) #1.5 correction factor comes from Claesson Thesis on plate HX
-//            
-//            G=self.mdot_c/self.A_c_flow
-//            Dh=self.Dh_c
-//            x=(Inputs['xin_c']+Inputs['xout_c'])/2
-//
-//            UA_total=1/(1/(h_h*self.A_h_wetted)+1/(h_c_2phase*self.A_c_wetted)+self.PlateThickness/(self.PlateConductivity*self.A_c_wetted))
-//            C_h=cp_h*self.mdot_h
-//            
-//            Qmax=C_h*(Inputs['Tin_h']-Inputs['Tsat_c'])
-//            epsilon=Q/Qmax
-//            
-//            if 1 <= epsilon < 1+1e-6:  #if epsilon is slightly larger than 1
-//                epsilon = 1-1e-12
-//            
-//            NTU=-log(1-epsilon)
-//            UA_req=NTU*C_h
-//            
-//            change=UA_req/UA_total-w
-//            w=UA_req/UA_total
-//        
-//        #Refrigerant charge
-//        rho_h=Props('D','T',Inputs['Tmean_h'], 'P', self.pin_h, self.Ref_h)
-//        Charge_h = w * self.V_h * rho_h
-//        rho_c=TwoPhaseDensity(self.Ref_c,Inputs['xin_c'],Inputs['xout_c'],self.Tdew_c,self.Tbubble_c,slipModel='Zivi')
-//        Charge_c = rho_c * w * self.V_c
-//        
-//        #Use Lockhart Martinelli to calculate the pressure drop.  Claesson found good agreement using C parameter of 4.67
-//        DP_frict_c=LMPressureGradientAvg(Inputs['xin_c'],Inputs['xout_c'],self.Ref_c,self.mdot_c/self.A_c_flow,self.Dh_c,self.Tbubble_c,self.Tdew_c,C=4.67)*w*self.Lp
-//        #Accelerational pressure drop component    
-//        DP_accel_c=AccelPressureDrop(Inputs['xin_c'],Inputs['xout_c'],self.Ref_c,self.mdot_c/self.A_c_flow,self.Tbubble_c,self.Tdew_c)
-//        
-//        #Pack outputs
-//        Outputs={
-//            'w':w,
-//            'Tout_h': Inputs['Tin_h']-Q/(self.mdot_h*cp_h),
-//            'Tout_c': Inputs['Tsat_c'],
-//            'Charge_c': Charge_c,
-//            'Charge_h': Charge_h,
-//            'DP_h': -PlateOutput_h['DELTAP'],
-//            'DP_c': DP_frict_c+DP_accel_c,
-//            'h_h':h_h,
-//            'h_c':h_c_2phase,
-//            'q_flux':q_flux
-//        }
-//        return dict(Inputs.items()+Outputs.items())
+
+class CooperFluxFunction : public FuncWrapper1D
+{
+protected:
+	BrazedPlateHeatExchanger *BPHE;
+	BPHECell *cell;
+public:
+	CooperFluxFunction(BrazedPlateHeatExchanger *BPHE, BPHECell *cell){
+		this->BPHE = BPHE;
+		this->cell = cell;
+	};
+	double call(double w)
+	{
+		// Calculate the flux
+		double q_flux=cell->Qdot/(w*BPHE->A_wetted_c);
+        
+		// Calculate the heat transfer coefficient using the Cooper correlation
+		cell->HTC_c = GeneralInternal::Cooper_1984_HTC(cell->CPS_c,q_flux);
+
+		// Evaluate UA [W/K] as if entire HX was in this section
+		double R_h = 1/(cell->HTC_h*BPHE->A_wetted_h);
+		double R_c = 1/(cell->HTC_c*BPHE->A_wetted_c);
+		cell->UA_available = 1/(R_h + R_c + BPHE->R_plate);
+        
+		return cell->UA_required/cell->UA_available-w;
+	}
+};
+
+/*
+The hot stream is all single phase, and the cold stream is evaporating
+*/
+void BrazedPlateHeatExchanger::_OnePhaseH_TwoPhaseC_Qimposed(BPHECell *cell)
+{   
+	// Define inputs to the heat transfer function
+	TCBPHE::BPHEData Inputs_hot;
+
+	// 
+	Inputs_hot.CPS = cell->CPS_h;
+	Inputs_hot.mdot_per_channel = this->mdot_h/this->Ngaps_h;
+
+	// Call the function for the heat transfer and pressure drop for the hot stream which is single phase
+	TCBPHE::BPHE_1phase(this->geo, &Inputs_hot);
+	cell->HTC_h = Inputs_hot.HTC;
+
+	/*
+    The Cooper Pool boiling relationship is a function of the heat flux, 
+    therefore the heat flux must be iteratively determined
+    */
+
+	
+
+	CooperFluxFunction CFF(this, cell);
+	std::string errstr;
+	cell->w = Brent(&CFF,1e-13,100,1e-16,1e-10,100,&errstr);
+	//cell->w = Secant(&CFF,0.75,0.01,1e-8,100,&errstr);
+    
+    double change = 999, w = 1;
+
+    do
+	{
+		// Calculate the flux
+        double q_flux=cell->Qdot/(w*this->A_wetted_c);
+        
+		// Calculate the heat transfer coefficient using the Cooper correlation
+		cell->HTC_c = GeneralInternal::Cooper_1984_HTC(cell->CPS_c,q_flux)*this->Cooper_tune_factor;
+
+        // Evaluate UA [W/K] as if entire HX was in this section
+		double R_h = 1/(cell->HTC_h*this->A_wetted_h);
+		double R_c = 1/(cell->HTC_c*this->A_wetted_c);
+		cell->UA_available = 1/(R_h + R_c + this->R_plate);
+        
+		change = cell->UA_required/cell->UA_available-w;
+        w = cell->UA_required/cell->UA_available;
+	}
+	while (fabs(change)>1e-10);
+	cell->w = w;
+    
+    /*#Refrigerant charge
+    rho_h=Props('D','T',Inputs['Tmean_h'], 'P', self.pin_h, self.Ref_h)
+    Charge_h = w * self.V_h * rho_h
+    rho_c=TwoPhaseDensity(self.Ref_c,Inputs['xin_c'],Inputs['xout_c'],self.Tdew_c,self.Tbubble_c,slipModel='Zivi')
+    Charge_c = rho_c * w * self.V_c
+    
+    #Use Lockhart Martinelli to calculate the pressure drop.  Claesson found good agreement using C parameter of 4.67
+    DP_frict_c=LMPressureGradientAvg(Inputs['xin_c'],Inputs['xout_c'],self.Ref_c,self.mdot_c/self.A_c_flow,self.Dh_c,self.Tbubble_c,self.Tdew_c,C=4.67)*w*self.Lp
+    #Accelerational pressure drop component    
+    DP_accel_c=AccelPressureDrop(Inputs['xin_c'],Inputs['xout_c'],self.Ref_c,self.mdot_c/self.A_c_flow,self.Tbubble_c,self.Tdew_c)*/
+    
+	cell->DP_h = Inputs_hot.DELTAP;
+    return;
+}
+
 //    
 //    def _OnePhaseH_TwoPhaseC_wimposed(self,Inputs):
 //        """

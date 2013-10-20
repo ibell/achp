@@ -32,16 +32,18 @@ namespace std {
 
 // This stuff will get included verbatim in CoolProp_wrap.cpp
 %{
-#include "CoolProp/GlobalConstants.h"
+#include "../externals/coolprop/CoolProp/GlobalConstants.h"
+#include "../externals/coolprop/CoolProp/CPState.h"
+#include "../externals/thermalcorr/src/BrazedPlateHeatExchanger.h"
 #include "ACHPcore.h"
-#include "CoolProp/CPState.h"
 #include "BPHE.h"
 #include "Compressor.h"
 %}
 
 // This is where the parsing actually happens
-%include "CoolProp/GlobalConstants.h"
+%include "../externals/coolprop/CoolProp/GlobalConstants.h"
+%include "../externals/coolprop/CoolProp/CPState.h"
+%include "../externals/thermalcorr/src/BrazedPlateHeatExchanger.h"
 %include "ACHPcore.h"
-%include "CoolProp/CPState.h"
 %include "BPHE.h"
 %include "Compressor.h"

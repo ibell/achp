@@ -42,7 +42,7 @@
 				Name="VCCLCompilerTool"
 				AdditionalOptions=""
 				Optimization="0"
-				AdditionalIncludeDirectories="C:\Users\Belli\Documents\Code\achp_git\externals"
+				AdditionalIncludeDirectories="externals"
 				PreprocessorDefinitions="WIN32;_DEBUG;_CONSOLE"
 				MinimalRebuild="true"
 				BasicRuntimeChecks="3"
@@ -119,7 +119,7 @@
 				Name="VCCLCompilerTool"
 				Optimization="2"
 				EnableIntrinsicFunctions="true"
-				AdditionalIncludeDirectories="C:\Users\Belli\Documents\Code\achp_git\externals\coolprop"
+				AdditionalIncludeDirectories="externals"
 				PreprocessorDefinitions="WIN32;NDEBUG;_CONSOLE"
 				RuntimeLibrary="2"
 				EnableFunctionLevelLinking="true"
@@ -316,6 +316,14 @@
 			</File>
 			<File
 				RelativePath=".\externals\coolprop\CoolProp\Ice.h"
+				>
+			</File>
+			<File
+				RelativePath=".\externals\coolprop\CoolProp\IncompBase.cpp"
+				>
+			</File>
+			<File
+				RelativePath=".\externals\coolprop\CoolProp\IncompBase.h"
 				>
 			</File>
 			<File

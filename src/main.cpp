@@ -1,10 +1,11 @@
 
 #include "Compressor.h"
 #include "BPHE.h"
-
+#include "time.h"
 int main()
 {
-
+	//enable_TTSE_LUT("Nitrogen");
+	set_standard_unit_system(UNIT_SYSTEM_SI);
 	BrazedPlateHeatExchanger BPHE = BrazedPlateHeatExchanger();
 	//BPHE.test();
 	//for (double mdot = 0.0001; mdot < 0.1; mdot += 0.0001)
@@ -13,30 +14,46 @@ int main()
 	//	BPHE.SaturationStates();
 	//	std::cout << mdot << " " << BPHE.calculate() << std::endl;
 	//}
-
+	
 	BPHE = BrazedPlateHeatExchanger();
 
-	BPHE.test();
+	BPHE.Nplates = 52;
+	BPHE.plate_conductivity = 15.0; //[W/m-K]
+	BPHE.more_channels = BPHE.MORE_CHANNELS_HOT;
+
+	BPHE.geo.Bp = 0.178;
+	BPHE.geo.Lp = 0.455; // Center-to-center distance between ports
+    BPHE.geo.PlateAmplitude = 0.002; //[m]
+    BPHE.geo.PlateThickness = 0.0004; //[m]
+    BPHE.geo.PlateWavelength =  0.007; //[m]
+    BPHE.geo.InclinationAngle=  58.8/180.0*M_PI; //[rad]
+
 	// Cold stream inlet
-	BPHE.State_c_inlet = CoolPropStateClassSI("Propane");
-    BPHE.State_c_inlet.update(iT,290,iQ,0.3);
-    BPHE.mdot_c = 0.01;
+	BPHE.State_c_inlet = CoolPropStateClassSI("R134a");
+	//BPHE.State_c_inlet.update(iT,73.93+273.15-5.48,iQ,0.04854);
+	BPHE.State_c_inlet.update(iQ, 0.125614881516 ,iT, 300.316986084);
+    BPHE.mdot_c = 0.262600004673; 
     
     // Hot stream inlet
-    BPHE.State_h_inlet = CoolPropStateClassSI("Propane");
-    BPHE.State_h_inlet.update(iT,320,iQ,1);
-    BPHE.State_h_inlet.update(iT,360,iP,BPHE.State_h_inlet.p());
+    BPHE.State_h_inlet = CoolPropStateClassSI("EG-50%");
+	BPHE.State_h_inlet.update(iT, 311.979980469 ,iP, 101325);
+	BPHE.mdot_h = 1.45700001717;
 
-	BPHE.mdot_h = BPHE.mdot_c*0.53940779782763737;
 	BPHE.calculate();
+	double rr = 0;
 
-	BPHE.verbosity = 10;
-	
-	//for (double mdot_ratio_h_c = 0.001; mdot_ratio_h_c < 1000; mdot_ratio_h_c *= 1.1)
+	///*
+	//BPHE.mdot_h = BPHE.mdot_c*0.53940779782763737;
+	//BPHE.calculate();
+	//BPHE.verbosity = 10;
+	//*/
+	//
+	//for (double mdot_ratio_h_c = 0.5; mdot_ratio_h_c < 0.9; mdot_ratio_h_c += 0.01)
 	//{
 	//	
-	//	BPHE.mdot_h = BPHE.mdot_c*0.53940779782763737;
+	//	BPHE.mdot_h = BPHE.mdot_c*mdot_ratio_h_c;
 	//	BPHE.calculate();
+	//	std::cout << mdot_ratio_h_c << std::endl;
 	//	//std::cout << mdot << " " << BPHE.calculate() << std::endl;
 	//}
 

@@ -1,4 +1,5 @@
 import ACHP
+from math import pi
 import matplotlib.pyplot as plt
 import numpy as np
 from CoolProp.Plots import Ph
@@ -23,6 +24,13 @@ for mdot_ratio_h_c in np.logspace(np.log10(0.1),np.log10(5),200):
     B.State_h_inlet.update(iT,320,iQ,1)
     B.State_h_inlet.update(iT,360,iP,B.State_h_inlet.p())
     B.mdot_h = B.mdot_c*mdot_ratio_h_c
+    
+    B.geo.Bp = 0.178;
+    B.geo.Lp = 0.455; # Center-to-center distance between ports
+    B.geo.PlateAmplitude = 0.002; #[m]
+    B.geo.PlateThickness = 0.0004; #[m]
+    B.geo.PlateWavelength =  0.007; #[m]
+    B.geo.InclinationAngle=  58.8/180.0*pi; #[rad]
     
     B.SaturationStates()
     Qmax = B.DetermineQmax()
@@ -55,5 +63,14 @@ for mdot_ratio_h_c in np.logspace(np.log10(0.1),np.log10(5),200):
     plt.suptitle('$\dot m_h/\dot m_c = $ {m:0.3}'.format(m=mdot_ratio_h_c))
     
     plt.tight_layout()
-    plt.savefig('{s:08d}'.format(s=int(mdot_ratio_h_c*1000))+'.pdf')    
+    plt.savefig('frame_{s:08d}'.format(s=int(mdot_ratio_h_c*1000))+'.png')    
     fig.clf()
+    
+import subprocess, glob, os
+
+os.remove('frame_00000100.png')
+
+subprocess.call('convert frame_*.png ani.gif', shell = True)
+
+for f in glob.glob('frame_*.png'):
+    os.remove(f)
