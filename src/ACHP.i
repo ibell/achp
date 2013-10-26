@@ -26,10 +26,6 @@
 // This allows for the use of STL strings
 %include "std_string.i"
 
-namespace std {
-   %template(vectord) vector<double>;
-};
-
 // This stuff will get included verbatim in CoolProp_wrap.cpp
 %{
 #include "../externals/coolprop/CoolProp/GlobalConstants.h"
@@ -47,3 +43,8 @@ namespace std {
 %include "ACHPcore.h"
 %include "BPHE.h"
 %include "Compressor.h"
+
+namespace std {
+   %template(vectord) vector<double>;
+   %template(vector_cell) vector<BPHECell>;
+};

@@ -88,8 +88,10 @@ void BrazedPlateHeatExchanger::_check()
 	if (!ValidNumber(this->geo.PlateWavelength)){throw ValueError("PlateWavelength is undefined for BPHE");}
 	if (!ValidNumber(this->geo.PlateThickness)){throw ValueError("PlateThickness is undefined for BPHE");}
 	if (!ValidNumber(this->geo.InclinationAngle)){throw ValueError("InclinationAngle is undefined for BPHE");}
-	if (!ValidNumber(this->geo.Bp)){throw ValueError("Bp is undefined for BPHE");}
+	if (!ValidNumber(this->geo.Wp)){throw ValueError("Wp is undefined for BPHE");}
 	if (!ValidNumber(this->geo.Lp)){throw ValueError("Lp is undefined for BPHE");}
+	if (!ValidNumber(this->geo.W)){throw ValueError("W is undefined for BPHE");}
+	if (!ValidNumber(this->geo.L)){throw ValueError("L is undefined for BPHE");}
 	if (this->Nplates <= 0  || this->Nplates > 1000 ){throw ValueError("Nplates is invalid for BPHE");}
 	if (!ValidNumber(this->plate_conductivity)){throw ValueError("plate_conductivity is undefined for BPHE");}
 	if (this->more_channels != MORE_CHANNELS_COLD && this->more_channels != MORE_CHANNELS_HOT){throw ValueError("more_channels is not one of MORE_CHANNELS_HOT or MORE_CHANNELS_COLD");}
@@ -118,20 +120,25 @@ void BrazedPlateHeatExchanger::calculate()
 	// Determine the maximum heat transfer rate considering internal and external pinching
 	Qmax = this->DetermineQmax();
 
+	if (this->verbosity > 6)
+	{
+		std::cout << format("Q max is: %g\n",Qmax);
+	}
+
 	// Hydraulic diameter
 	double X = 2*M_PI*this->geo.PlateAmplitude/this->geo.PlateWavelength;
     double PHI = 1.0/6.0*(1+sqrt(1+X*X)+4*sqrt(1+X*X/2));
     double dh = 4*this->geo.PlateAmplitude/PHI;
 	
 	// Area of one plate
-    double A0 = this->geo.Bp*this->geo.Lp; // The projected surface between the ports
+    double A0 = this->geo.W*this->geo.L; // The projected surface between the ports
     double A_plate = PHI*A0; // The plane surface of one plate
 
 	// The flow area of one gap
-	double A_flow_gap = 2*this->geo.PlateAmplitude*this->geo.Bp;
+	double A_flow_gap = 2*this->geo.PlateAmplitude*this->geo.W;
 
 	// The volume of one channel
-    double Vchannel = this->geo.Bp*this->geo.Lp*2*this->geo.PlateAmplitude;
+    double Vchannel = this->geo.W*this->geo.L*2*this->geo.PlateAmplitude;
 
 	// There are (Nplates-2) active plates (outer ones don't do anything)
 	this->A_wetted_h = A_plate*(this->Nplates-2);
@@ -161,6 +168,10 @@ public:
 	HeatTransferObjectiveFunction(BrazedPlateHeatExchanger *BPHE){this->BPHE = BPHE;};
 	double call(double Q)
 	{
+		if (BPHE->verbosity > 9)
+		{
+			std::cout << format("Q: %g\n",Q);
+		}
 		BPHE->CellList.clear();
 		
 		double w_summer = 0;
@@ -785,11 +796,9 @@ void BrazedPlateHeatExchanger::_OnePhaseH_TwoPhaseC_Qimposed(BPHECell *cell)
     therefore the heat flux must be iteratively determined
     */
 
-	
-
 	CooperFluxFunction CFF(this, cell);
 	std::string errstr;
-	cell->w = Brent(&CFF,1e-13,100,1e-16,1e-10,100,&errstr);
+	//cell->w = Brent(&CFF,1e-13,100,1e-16,1e-10,100,&errstr);
 	//cell->w = Secant(&CFF,0.75,0.01,1e-8,100,&errstr);
     
     double change = 999, w = 1;
@@ -1410,7 +1419,7 @@ void BrazedPlateHeatExchanger::test()
 	this->plate_conductivity = 15.0; //[W/m-K]
 	this->more_channels = this->MORE_CHANNELS_HOT;
 
-	this->geo.Bp = 0.101;
+	this->geo.Wp = 0.101;
 	this->geo.Lp = 0.455; // Center-to-center distance between ports
     this->geo.PlateAmplitude = 0.00102; //[m]
     this->geo.PlateThickness = 0.0003; //[m]

@@ -4,6 +4,8 @@
 #include "time.h"
 int main()
 {
+	
+
 	//enable_TTSE_LUT("Nitrogen");
 	set_standard_unit_system(UNIT_SYSTEM_SI);
 	BrazedPlateHeatExchanger BPHE = BrazedPlateHeatExchanger();
@@ -21,7 +23,9 @@ int main()
 	BPHE.plate_conductivity = 15.0; //[W/m-K]
 	BPHE.more_channels = BPHE.MORE_CHANNELS_HOT;
 
-	BPHE.geo.Bp = 0.178;
+	BPHE.geo.W = 0.200;
+	BPHE.geo.Wp = 0.178;
+	BPHE.geo.L = 0.4; 
 	BPHE.geo.Lp = 0.455; // Center-to-center distance between ports
     BPHE.geo.PlateAmplitude = 0.002; //[m]
     BPHE.geo.PlateThickness = 0.0004; //[m]
@@ -29,13 +33,13 @@ int main()
     BPHE.geo.InclinationAngle=  58.8/180.0*M_PI; //[rad]
 
 	// Cold stream inlet
-	BPHE.State_c_inlet = CoolPropStateClassSI("R134a");
+	BPHE.State_c_inlet = CoolPropStateClassSI("Water");
 	//BPHE.State_c_inlet.update(iT,73.93+273.15-5.48,iQ,0.04854);
-	BPHE.State_c_inlet.update(iQ, 0.125614881516 ,iT, 300.316986084);
+	BPHE.State_c_inlet.update(iP, 101325 ,iT, 300.316986084);
     BPHE.mdot_c = 0.262600004673; 
     
     // Hot stream inlet
-    BPHE.State_h_inlet = CoolPropStateClassSI("EG-50%");
+    BPHE.State_h_inlet = CoolPropStateClassSI("Water");
 	BPHE.State_h_inlet.update(iT, 311.979980469 ,iP, 101325);
 	BPHE.mdot_h = 1.45700001717;
 
